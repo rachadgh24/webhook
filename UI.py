@@ -1,8 +1,9 @@
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
-from store import conversations, listeners, orders, update_order_status
+from store import conversations, listeners, orders, update_order_status, add_message
 import asyncio, json
 from starlette.responses import StreamingResponse
+from webhook import send_whatsapp_message
 
 router = APIRouter()
 
@@ -404,9 +405,22 @@ async def history():
 async def get_orders():
     return list(orders.values())
 
+STATUS_MESSAGES = {
+    "confirmed": "Your order {order_id} has been confirmed and will be prepared shortly.",
+    "preparing": "Your order {order_id} is now being prepared.",
+    "on_the_way": "Your order {order_id} is on the way!",
+    "delivered": "Your order {order_id} has been delivered. Enjoy your meal!",
+}
+
 @router.post("/orders/{order_id}/status")
 async def set_order_status(order_id: str, body: dict):
     result = update_order_status(order_id, body["status"])
     if not result:
         return {"error": "Order not found"}
+    new_status = body["status"]
+    if new_status in STATUS_MESSAGES:
+        msg_text = STATUS_MESSAGES[new_status].format(order_id=order_id)
+        phone = result["phone"]
+        await add_message(phone, "assistant", msg_text)
+        await send_whatsapp_message(phone, msg_text)
     return result
