@@ -13,6 +13,9 @@ VERIFY_TOKEN = "my_secret_token_toto123"
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
 
+print("TOKEN LOADED:", repr(WHATSAPP_TOKEN[:10]) if WHATSAPP_TOKEN else "NONE")
+print("PHONE_ID LOADED:", repr(PHONE_NUMBER_ID))
+
 
 async def send_whatsapp_message(to_phone: str, text: str):
     url = f"https://graph.facebook.com/v21.0/{PHONE_NUMBER_ID}/messages"
