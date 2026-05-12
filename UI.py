@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
-from store import conversations, listeners
+from store import conversations, listeners, orders, update_order_status
 import asyncio, json
 from starlette.responses import StreamingResponse
 
@@ -140,6 +140,71 @@ HTML = """
     color: #8696a0;
     font-size: 14px;
   }
+
+  .orders-panel {
+    width: 300px;
+    background: #111b21;
+    border-left: 1px solid #374045;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+
+  .orders-header {
+    background: #202c33;
+    padding: 16px;
+    font-size: 16px;
+    font-weight: 500;
+    border-bottom: 1px solid #374045;
+  }
+
+  .orders-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+
+  .order-card {
+    background: #202c33;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 8px;
+  }
+
+  .order-id { font-weight: 600; font-size: 13px; color: #00a884; }
+  .order-items { font-size: 12px; color: #8696a0; margin: 6px 0; }
+  .order-total { font-size: 13px; font-weight: 500; }
+  .order-time { font-size: 11px; color: #8696a0; margin-top: 4px; }
+
+  .order-status {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-top: 6px;
+  }
+
+  .status-pending { background: #4a3f00; color: #ffd000; }
+  .status-confirmed { background: #003a2e; color: #00c897; }
+  .status-preparing { background: #1a3a5c; color: #4da6ff; }
+  .status-on_the_way { background: #3a1a5c; color: #b44dff; }
+  .status-delivered { background: #1a3a1a; color: #4dff4d; }
+
+  .status-btn {
+    background: #2a3942;
+    border: none;
+    color: #e9edef;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+    margin-top: 6px;
+    margin-right: 4px;
+    transition: background 0.15s;
+  }
+
+  .status-btn:hover { background: #374045; }
 </style>
 </head>
 <body>
@@ -159,6 +224,13 @@ HTML = """
 
   <div class="messages" id="messages">
     <div class="empty-state">Select a conversation</div>
+  </div>
+</div>
+
+<div class="orders-panel">
+  <div class="orders-header">Orders</div>
+  <div class="orders-list" id="ordersList">
+    <div class="empty-state">No orders yet</div>
   </div>
 </div>
 
@@ -213,6 +285,7 @@ HTML = """
     activePhone = phone;
     renderContacts();
     renderMessages();
+    loadOrders();
   }
 
   function addIncoming(msg) {
@@ -239,7 +312,60 @@ HTML = """
   const events = new EventSource("/events");
   events.onmessage = (e) => {
     addIncoming(JSON.parse(e.data));
+    loadOrders();
   };
+
+  const ordersList = document.getElementById("ordersList");
+  const NEXT_STATUS = {
+    "pending": "confirmed",
+    "confirmed": "preparing",
+    "preparing": "on_the_way",
+    "on_the_way": "delivered"
+  };
+
+  function loadOrders() {
+    fetch("/orders")
+      .then(r => r.json())
+      .then(data => renderOrders(data));
+  }
+
+  function renderOrders(allOrders) {
+    const filtered = activePhone
+      ? allOrders.filter(o => o.phone === activePhone)
+      : allOrders;
+    if (filtered.length === 0) {
+      ordersList.innerHTML = '<div class="empty-state">No orders</div>';
+      return;
+    }
+    ordersList.innerHTML = "";
+    filtered.reverse().forEach(order => {
+      const items = order.items.map(i => i.name + " x" + i.qty).join(", ");
+      const next = NEXT_STATUS[order.status];
+      const btns = next
+        ? '<button class="status-btn" onclick="updateStatus(\'' + order.order_id + "','" + next + "')\">" + next.replace("_", " ") + "</button>"
+        : "";
+      ordersList.innerHTML +=
+        '<div class="order-card">' +
+        '<div class="order-id">' + order.order_id + '</div>' +
+        '<div class="order-items">' + items + '</div>' +
+        '<div class="order-total">$' + order.total.toFixed(2) + '</div>' +
+        '<div class="order-time">' + order.created_at + '</div>' +
+        '<span class="order-status status-' + order.status + '">' + order.status.replace("_", " ") + '</span><br>' +
+        btns +
+        '</div>';
+    });
+  }
+
+  function updateStatus(orderId, newStatus) {
+    fetch("/orders/" + orderId + "/status", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({status: newStatus})
+    }).then(() => loadOrders());
+  }
+
+  loadOrders();
+  setInterval(loadOrders, 5000);
 </script>
 
 </body>
@@ -269,3 +395,14 @@ async def sse():
 @router.get("/history")
 async def history():
     return conversations
+
+@router.get("/orders")
+async def get_orders():
+    return list(orders.values())
+
+@router.post("/orders/{order_id}/status")
+async def set_order_status(order_id: str, body: dict):
+    result = update_order_status(order_id, body["status"])
+    if not result:
+        return {"error": "Order not found"}
+    return result

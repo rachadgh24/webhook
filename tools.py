@@ -1,3 +1,7 @@
+import json as _json
+from store import create_order as _create_order, confirm_order as _confirm_order
+from store import get_order_status as _get_order_status, get_orders_by_phone as _get_orders_by_phone
+
 MENU_PHOTO_MEDIA_ID = "2017954492405428"
 
 MENU = {
@@ -67,11 +71,13 @@ def get_category_menu(category: str):
 
 
 def check_price(item_name: str):
+    query = item_name.lower()
     for items in MENU.values():
         for item in items:
-            if item["name"].lower() == item_name.lower():
+            name = item["name"].lower()
+            if name == query or name in query or query in name:
                 return f"{item['name']}: ${item['price']:.2f}"
-    return f"Item '{item_name}' not found on the menu."
+    return f"Item '{item_name}' not found on the menu. Use get_full_menu to see available items."
 
 
 def get_restaurant_hours():
@@ -102,6 +108,59 @@ def send_menu_photo():
     return "Menu photo has been sent to the client."
 
 
+def place_order(phone: str, items_json: str):
+    items_raw = _json.loads(items_json) if isinstance(items_json, str) else items_json
+    resolved_items = []
+    for entry in items_raw:
+        name = entry.get("name", "")
+        qty = entry.get("qty", 1)
+        query = name.lower()
+        found = False
+        for menu_items in MENU.values():
+            for item in menu_items:
+                menu_name = item["name"].lower()
+                if menu_name == query or menu_name in query or query in menu_name:
+                    resolved_items.append({"name": item["name"], "qty": qty, "price": item["price"]})
+                    found = True
+                    break
+            if found:
+                break
+        if not found:
+            return f"Item '{name}' not found on the menu. Please check the menu and try again."
+
+    order = _create_order(phone, resolved_items)
+    lines = [f"Order {order['order_id']} created:"]
+    for item in order["items"]:
+        lines.append(f"  - {item['name']} x{item['qty']} = ${item['price'] * item['qty']:.2f}")
+    lines.append(f"Total: ${order['total']:.2f}")
+    lines.append(f"Status: {order['status']}")
+    lines.append("Ask the client to confirm the order.")
+    return "\n".join(lines)
+
+
+def confirm_client_order(order_id: str):
+    order = _confirm_order(order_id)
+    if not order:
+        return f"Order {order_id} not found."
+    if order["status"] == "confirmed":
+        return f"Order {order_id} is confirmed. Total: ${order['total']:.2f}. It will be prepared shortly."
+    return f"Order {order_id} cannot be confirmed. Current status: {order['status']}."
+
+
+def check_client_order_status(phone: str):
+    client_orders = _get_orders_by_phone(phone)
+    if not client_orders:
+        return "No orders found for this client."
+    latest = client_orders[-1]
+    lines = [f"Order {latest['order_id']}:"]
+    for item in latest["items"]:
+        lines.append(f"  - {item['name']} x{item['qty']}")
+    lines.append(f"Total: ${latest['total']:.2f}")
+    lines.append(f"Status: {latest['status']}")
+    lines.append(f"Placed at: {latest['created_at']}")
+    return "\n".join(lines)
+
+
 # --- Map function names to handlers ---
 
 TOOL_HANDLERS = {
@@ -112,6 +171,9 @@ TOOL_HANDLERS = {
     "get_restaurant_info": lambda args: get_restaurant_info(),
     "check_delivery_availability": lambda args: check_delivery_availability(),
     "send_menu_photo": lambda args: send_menu_photo(),
+    "place_order": lambda args: place_order(args["phone"], args["items"]),
+    "confirm_order": lambda args: confirm_client_order(args["order_id"]),
+    "check_order_status": lambda args: check_client_order_status(args["phone"]),
 }
 
 
@@ -184,6 +246,49 @@ TOOL_DEFINITIONS = [
             "name": "send_menu_photo",
             "description": "Sends a photo of the restaurant menu/catalogue to the client. Use this when the client asks to see the menu, catalogue, or wants a photo of what's available.",
             "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "place_order",
+            "description": "Creates a new order for the client. Use when the client wants to order items. The order starts as 'pending' and needs client confirmation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "phone": {"type": "string", "description": "The client's phone number"},
+                    "items": {"type": "string", "description": "JSON array of items, e.g. [{\"name\": \"Grilled Salmon\", \"qty\": 2}, {\"name\": \"Water\", \"qty\": 1}]"},
+                },
+                "required": ["phone", "items"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "confirm_order",
+            "description": "Confirms a pending order after the client agrees. Use when the client says 'yes', 'confirm', 'go ahead', etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "order_id": {"type": "string", "description": "The order ID to confirm (e.g. ORD-0001)"},
+                },
+                "required": ["order_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_order_status",
+            "description": "Checks the status of the client's latest order. Use when the client asks about their order status.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "phone": {"type": "string", "description": "The client's phone number"},
+                },
+                "required": ["phone"],
+            },
         },
     },
 ]
