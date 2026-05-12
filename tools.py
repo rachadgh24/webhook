@@ -1,4 +1,4 @@
-import json
+MENU_PHOTO_MEDIA_ID = "2017954492405428"
 
 MENU = {
     "starters": [
@@ -98,6 +98,10 @@ def check_delivery_availability():
     return "Sorry, we do not offer delivery at this time."
 
 
+def send_menu_photo():
+    return f"[SEND_IMAGE:{MENU_PHOTO_MEDIA_ID}:Here's our menu]"
+
+
 # --- Map function names to handlers ---
 
 TOOL_HANDLERS = {
@@ -107,6 +111,7 @@ TOOL_HANDLERS = {
     "get_restaurant_hours": lambda args: get_restaurant_hours(),
     "get_restaurant_info": lambda args: get_restaurant_info(),
     "check_delivery_availability": lambda args: check_delivery_availability(),
+    "send_menu_photo": lambda args: send_menu_photo(),
 }
 
 
@@ -170,6 +175,14 @@ TOOL_DEFINITIONS = [
         "function": {
             "name": "check_delivery_availability",
             "description": "Checks if the restaurant offers delivery, and returns the delivery fee and minimum order.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_menu_photo",
+            "description": "Sends a photo of the restaurant menu/catalogue to the client. Use this when the client asks to see the menu, catalogue, or wants a photo of what's available.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
