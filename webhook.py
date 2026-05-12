@@ -1,5 +1,4 @@
 import os
-import re
 import httpx
 from fastapi import APIRouter, Request, Query, Response, HTTPException
 from dotenv import load_dotenv
@@ -76,21 +75,14 @@ async def receive_messages(request: Request):
                 if msg.get("type") == "text":
                     user_text = msg["text"]["body"]
                     await add_message(sender_phone, "user", user_text)
-                    ai_reply = await get_ai_response(sender_phone, user_text)
+                    result = await get_ai_response(sender_phone, user_text)
 
-                    image_match = re.search(r'\[SEND_IMAGE:(.+?):(.+?)\]', ai_reply)
-                    if image_match:
-                        media_id = image_match.group(1)
-                        caption = image_match.group(2)
-                        clean_reply = re.sub(r'\[SEND_IMAGE:.+?\]', '', ai_reply).strip()
-                        if clean_reply:
-                            await add_message(sender_phone, "assistant", clean_reply)
-                            await send_whatsapp_message(sender_phone, clean_reply)
-                        await add_message(sender_phone, "assistant", f"[Photo: {caption}]")
-                        await send_whatsapp_image(sender_phone, media_id, caption)
-                    else:
-                        await add_message(sender_phone, "assistant", ai_reply)
-                        await send_whatsapp_message(sender_phone, ai_reply)
+                    await add_message(sender_phone, "assistant", result["text"])
+                    await send_whatsapp_message(sender_phone, result["text"])
+
+                    for img in result["images"]:
+                        await add_message(sender_phone, "assistant", f"[Photo: {img['caption']}]")
+                        await send_whatsapp_image(sender_phone, img["media_id"], img["caption"])
                 else:
                     reply = "I can only process text messages. Please send your request as text."
                     await add_message(sender_phone, "assistant", reply)

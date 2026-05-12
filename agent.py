@@ -2,7 +2,7 @@ import os
 import json
 from dotenv import load_dotenv
 from openai import OpenAI
-from tools import TOOL_DEFINITIONS, TOOL_HANDLERS
+from tools import TOOL_DEFINITIONS, TOOL_HANDLERS, MENU_PHOTO_MEDIA_ID
 
 load_dotenv()
 
@@ -40,12 +40,18 @@ chat_histories = {}
 MAX_TOOL_ROUNDS = 5
 
 
-async def get_ai_response(phone: str, user_prompt: str) -> str:
+IMAGE_TOOLS = {
+    "send_menu_photo": {"media_id": MENU_PHOTO_MEDIA_ID, "caption": "Here's our menu"},
+}
+
+
+async def get_ai_response(phone: str, user_prompt: str):
     if phone not in chat_histories:
         chat_histories[phone] = [{"role": "system", "content": SYSTEM_PROMPT}]
 
     history = chat_histories[phone]
     history.append({"role": "user", "content": user_prompt})
+    images_to_send = []
 
     for _ in range(MAX_TOOL_ROUNDS):
         response = client.chat.completions.create(
@@ -57,7 +63,7 @@ async def get_ai_response(phone: str, user_prompt: str) -> str:
 
         if not msg.tool_calls:
             history.append({"role": "assistant", "content": msg.content})
-            return msg.content
+            return {"text": msg.content, "images": images_to_send}
 
         history.append(msg)
 
@@ -65,6 +71,9 @@ async def get_ai_response(phone: str, user_prompt: str) -> str:
             fn_name = tool_call.function.name
             fn_args = json.loads(tool_call.function.arguments)
             handler = TOOL_HANDLERS.get(fn_name)
+
+            if fn_name in IMAGE_TOOLS:
+                images_to_send.append(IMAGE_TOOLS[fn_name])
 
             if handler:
                 result = handler(fn_args)
@@ -79,4 +88,4 @@ async def get_ai_response(phone: str, user_prompt: str) -> str:
 
     fallback = "Sorry, I couldn't process your request. Please try again."
     history.append({"role": "assistant", "content": fallback})
-    return fallback
+    return {"text": fallback, "images": []}

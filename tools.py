@@ -99,7 +99,7 @@ def check_delivery_availability():
 
 
 def send_menu_photo():
-    return f"[SEND_IMAGE:{MENU_PHOTO_MEDIA_ID}:Here's our menu]"
+    return "Menu photo has been sent to the client."
 
 
 # --- Map function names to handlers ---
