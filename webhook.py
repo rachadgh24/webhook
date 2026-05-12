@@ -56,8 +56,8 @@ async def receive_messages(request: Request):
                 if msg.get("type") == "text":
                     sender_phone = msg["from"]
                     user_text = msg["text"]["body"]
-                    await add_message("user", user_text)
-                    ai_reply = await get_ai_response(user_text)
-                    await add_message("assistant", ai_reply)
+                    await add_message(sender_phone, "user", user_text)
+                    ai_reply = await get_ai_response(sender_phone, user_text)
+                    await add_message(sender_phone, "assistant", ai_reply)
                     await send_whatsapp_message(sender_phone, ai_reply)
     return {"status": "success"}

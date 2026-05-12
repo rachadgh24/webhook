@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
-from store import conversation, listeners
+from store import conversations, listeners
 import asyncio, json
 from starlette.responses import StreamingResponse
 
@@ -21,13 +21,58 @@ HTML = """
     background: #0b141a;
     color: #e9edef;
     display: flex;
-    justify-content: center;
     height: 100vh;
   }
 
+  .sidebar {
+    width: 300px;
+    background: #111b21;
+    border-right: 1px solid #374045;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+
+  .sidebar-header {
+    background: #202c33;
+    padding: 16px;
+    font-size: 16px;
+    font-weight: 500;
+    border-bottom: 1px solid #374045;
+  }
+
+  .contact-list {
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  .contact {
+    padding: 14px 16px;
+    cursor: pointer;
+    border-bottom: 1px solid #1e2a30;
+    transition: background 0.15s;
+  }
+
+  .contact:hover { background: #202c33; }
+
+  .contact.active { background: #2a3942; }
+
+  .contact-phone {
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  .contact-preview {
+    font-size: 12px;
+    color: #8696a0;
+    margin-top: 4px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
   .chat-container {
-    width: 100%;
-    max-width: 500px;
+    flex: 1;
     display: flex;
     flex-direction: column;
     height: 100vh;
@@ -73,15 +118,6 @@ HTML = """
     border-radius: 8px;
     font-size: 14px;
     line-height: 1.4;
-    position: relative;
-  }
-
-  .msg .time {
-    font-size: 11px;
-    color: #8696a0;
-    float: right;
-    margin-left: 8px;
-    margin-top: 4px;
   }
 
   .incoming {
@@ -96,46 +132,113 @@ HTML = """
     border-top-right-radius: 0;
   }
 
+  .empty-state {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #8696a0;
+    font-size: 14px;
+  }
 </style>
 </head>
 <body>
 
+<div class="sidebar">
+  <div class="sidebar-header">Conversations</div>
+  <div class="contact-list" id="contactList"></div>
+</div>
+
 <div class="chat-container">
-  <div class="header">
-    <div class="avatar">T</div>
+  <div class="header" id="chatHeader" style="display:none;">
+    <div class="avatar" id="avatarLetter"></div>
     <div class="header-info">
-      <h2>Toto</h2>
-      <span>online</span>
+      <h2 id="headerPhone"></h2>
     </div>
   </div>
 
-  <div class="messages" id="messages"></div>
+  <div class="messages" id="messages">
+    <div class="empty-state">Select a conversation</div>
+  </div>
 </div>
 
 <script>
-  const messages = [];
-  const container = document.getElementById("messages");
+  const allConversations = {};
+  let activePhone = null;
 
-  function render() {
+  const contactList = document.getElementById("contactList");
+  const container = document.getElementById("messages");
+  const chatHeader = document.getElementById("chatHeader");
+  const headerPhone = document.getElementById("headerPhone");
+  const avatarLetter = document.getElementById("avatarLetter");
+
+  function renderContacts() {
+    contactList.innerHTML = "";
+    const phones = Object.keys(allConversations);
+    phones.forEach(phone => {
+      const msgs = allConversations[phone];
+      const last = msgs[msgs.length - 1];
+      const div = document.createElement("div");
+      div.className = "contact" + (phone === activePhone ? " active" : "");
+      div.innerHTML =
+        '<div class="contact-phone">+' + phone + '</div>' +
+        '<div class="contact-preview">' + (last ? last.text : "") + '</div>';
+      div.onclick = () => selectChat(phone);
+      contactList.appendChild(div);
+    });
+  }
+
+  function renderMessages() {
+    if (!activePhone || !allConversations[activePhone]) {
+      container.innerHTML = '<div class="empty-state">Select a conversation</div>';
+      chatHeader.style.display = "none";
+      return;
+    }
+    chatHeader.style.display = "flex";
+    headerPhone.textContent = "+" + activePhone;
+    avatarLetter.textContent = activePhone.slice(-2);
+
     container.innerHTML = "";
-    messages.forEach(msg => {
+    allConversations[activePhone].forEach(msg => {
       const div = document.createElement("div");
       const type = msg.sender === "user" ? "outgoing" : "incoming";
       div.className = "msg " + type;
-      div.innerHTML = msg.text;
+      div.textContent = msg.text;
       container.appendChild(div);
     });
     container.scrollTop = container.scrollHeight;
   }
 
+  function selectChat(phone) {
+    activePhone = phone;
+    renderContacts();
+    renderMessages();
+  }
+
+  function addIncoming(msg) {
+    if (!allConversations[msg.phone]) {
+      allConversations[msg.phone] = [];
+    }
+    allConversations[msg.phone].push(msg);
+    renderContacts();
+    if (msg.phone === activePhone) {
+      renderMessages();
+    }
+  }
+
   fetch("/history")
     .then(r => r.json())
-    .then(data => { data.forEach(m => messages.push(m)); render(); });
+    .then(data => {
+      Object.keys(data).forEach(phone => {
+        allConversations[phone] = data[phone];
+      });
+      renderContacts();
+      renderMessages();
+    });
 
   const events = new EventSource("/events");
   events.onmessage = (e) => {
-    messages.push(JSON.parse(e.data));
-    render();
+    addIncoming(JSON.parse(e.data));
   };
 </script>
 
@@ -152,7 +255,7 @@ async def chat_ui():
 async def sse():
     queue = asyncio.Queue()
     listeners.append(queue)
-    
+
     async def stream():
         try:
             while True:
@@ -160,9 +263,9 @@ async def sse():
                 yield f"data: {json.dumps(msg)}\n\n"
         finally:
             listeners.remove(queue)
-    
+
     return StreamingResponse(stream(), media_type="text/event-stream")
 
 @router.get("/history")
 async def history():
-    return conversation
+    return conversations

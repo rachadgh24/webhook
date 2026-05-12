@@ -9,15 +9,18 @@ client = OpenAI(
     base_url=os.getenv("AI_URL"),
 )
 
-chat_history = []
+chat_histories = {}
 
-async def get_ai_response(user_prompt: str) -> str:
-    chat_history.append({"role": "user", "content": user_prompt})
+
+async def get_ai_response(phone: str, user_prompt: str) -> str:
+    if phone not in chat_histories:
+        chat_histories[phone] = []
+    history = chat_histories[phone]
+    history.append({"role": "user", "content": user_prompt})
     response = client.chat.completions.create(
         model=os.getenv("AI_MODEL"),
-        messages=chat_history,
+        messages=history,
     )
     reply = response.choices[0].message.content
-    chat_history.append({"role": "assistant", "content": reply})
+    history.append({"role": "assistant", "content": reply})
     return reply
-
