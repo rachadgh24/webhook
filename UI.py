@@ -341,18 +341,22 @@ HTML = """
     filtered.reverse().forEach(order => {
       const items = order.items.map(i => i.name + " x" + i.qty).join(", ");
       const next = NEXT_STATUS[order.status];
-      const btns = next
-        ? '<button class="status-btn" onclick="updateStatus(\'' + order.order_id + "','" + next + "')\">" + next.replace("_", " ") + "</button>"
-        : "";
-      ordersList.innerHTML +=
-        '<div class="order-card">' +
+      const card = document.createElement("div");
+      card.className = "order-card";
+      card.innerHTML =
         '<div class="order-id">' + order.order_id + '</div>' +
         '<div class="order-items">' + items + '</div>' +
         '<div class="order-total">$' + order.total.toFixed(2) + '</div>' +
         '<div class="order-time">' + order.created_at + '</div>' +
-        '<span class="order-status status-' + order.status + '">' + order.status.replace("_", " ") + '</span><br>' +
-        btns +
-        '</div>';
+        '<span class="order-status status-' + order.status + '">' + order.status.replace("_", " ") + '</span><br>';
+      if (next) {
+        const btn = document.createElement("button");
+        btn.className = "status-btn";
+        btn.textContent = next.replace("_", " ");
+        btn.addEventListener("click", function() { updateStatus(order.order_id, next); });
+        card.appendChild(btn);
+      }
+      ordersList.appendChild(card);
     });
   }
 
