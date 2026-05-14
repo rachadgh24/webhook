@@ -5,6 +5,21 @@ conversations = {}
 listeners = []
 orders = {}
 order_counter = 0
+delivery_log = []
+MAX_DELIVERY_LOG = 50
+
+
+def log_delivery(stage: str, phone: str | None = None, ok: bool = True, status_code: int | None = None, detail: str = ""):
+    delivery_log.append({
+        "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "stage": stage,
+        "phone": phone,
+        "ok": ok,
+        "status_code": status_code,
+        "detail": detail,
+    })
+    if len(delivery_log) > MAX_DELIVERY_LOG:
+        delivery_log[:] = delivery_log[-MAX_DELIVERY_LOG:]
 
 
 def get_conversation(phone: str):
