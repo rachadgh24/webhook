@@ -1,15 +1,13 @@
 import os
-import json
+
 from dotenv import load_dotenv
-from openai import OpenAI
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_openai import ChatOpenAI
 from tools import TOOL_DEFINITIONS, TOOL_HANDLERS, MENU_PHOTO_MEDIA_ID
 
 load_dotenv()
-
-client = OpenAI(
-    api_key=os.getenv("AI_KEY"),
-    base_url=os.getenv("AI_URL"),
-)
 
 SYSTEM_PROMPT = (
     "### CORE MISSION\n"
@@ -50,40 +48,55 @@ chat_histories = {}
 
 MAX_TOOL_ROUNDS = 5
 
-
 IMAGE_TOOLS = {
     "send_menu_photo": {"media_id": MENU_PHOTO_MEDIA_ID, "caption": "Here's our menu"},
 }
 
+model = ChatOpenAI(
+    model=os.getenv("AI_MODEL"),
+    api_key=os.getenv("AI_KEY"),
+    base_url=os.getenv("AI_URL"),
+)
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", SYSTEM_PROMPT),
+    ("system", "The current client's phone number is: {phone}"),
+    MessagesPlaceholder("history"),
+])
+
+agent_chain = prompt | model.bind_tools(TOOL_DEFINITIONS)
+
+text_parser = StrOutputParser()
+
+
+def _tool_call_fields(tool_call):
+    if isinstance(tool_call, dict):
+        return tool_call["name"], tool_call.get("args", {}), tool_call["id"]
+    return tool_call.name, tool_call.args, tool_call.id
+
 
 async def get_ai_response(phone: str, user_prompt: str):
     if phone not in chat_histories:
-        chat_histories[phone] = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "system", "content": f"The current client's phone number is: {phone}"},
-        ]
+        chat_histories[phone] = []
 
     history = chat_histories[phone]
-    history.append({"role": "user", "content": user_prompt})
+    history.append(HumanMessage(content=user_prompt))
     images_to_send = []
 
     for _ in range(MAX_TOOL_ROUNDS):
-        response = client.chat.completions.create(
-            model=os.getenv("AI_MODEL"),
-            messages=history,
-            tools=TOOL_DEFINITIONS,
-        )
-        msg = response.choices[0].message
+        response = await agent_chain.ainvoke({
+            "phone": phone,
+            "history": history,
+        })
 
-        if not msg.tool_calls:
-            history.append({"role": "assistant", "content": msg.content})
-            return {"text": msg.content, "images": images_to_send}
+        if not response.tool_calls:
+            history.append(response)
+            return {"text": text_parser.invoke(response), "images": images_to_send}
 
-        history.append(msg)
+        history.append(response)
 
-        for tool_call in msg.tool_calls:
-            fn_name = tool_call.function.name
-            fn_args = json.loads(tool_call.function.arguments)
+        for tool_call in response.tool_calls:
+            fn_name, fn_args, tool_call_id = _tool_call_fields(tool_call)
             handler = TOOL_HANDLERS.get(fn_name)
 
             if fn_name in IMAGE_TOOLS:
@@ -94,12 +107,8 @@ async def get_ai_response(phone: str, user_prompt: str):
             else:
                 result = f"Unknown tool: {fn_name}"
 
-            history.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": result,
-            })
+            history.append(ToolMessage(content=result, tool_call_id=tool_call_id))
 
     fallback = "Sorry, I couldn't process your request. Please try again."
-    history.append({"role": "assistant", "content": fallback})
+    history.append(AIMessage(content=fallback))
     return {"text": fallback, "images": []}
