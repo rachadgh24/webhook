@@ -97,8 +97,17 @@ async def should_escalate(text: str) -> bool:
             temperature=0,
         )
         raw = response.choices[0].message.content.strip()
-        return bool(json.loads(raw).get("escalate", False))
-    except Exception:
+        print(f"[escalation] raw='{raw}'", flush=True)
+        # Extract the first JSON object even if the model adds surrounding text.
+        m = re.search(r'\{[^}]+\}', raw)
+        if not m:
+            print("[escalation] no JSON found → False", flush=True)
+            return False
+        result = bool(json.loads(m.group()).get("escalate", False))
+        print(f"[escalation] result={result}", flush=True)
+        return result
+    except Exception as exc:
+        print(f"[escalation] exception: {exc} → False", flush=True)
         return False
 
 
