@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
-from store import conversations, listeners, orders, update_order_status
+from store import conversations, listeners, orders, update_order_status, escalated_phones, set_escalation
 import asyncio, json
 from starlette.responses import StreamingResponse
 
@@ -54,12 +54,29 @@ HTML = """
   }
 
   .contact:hover { background: #202c33; }
-
   .contact.active { background: #2a3942; }
+
+  .contact.escalated {
+    border-left: 3px solid #e53935;
+  }
 
   .contact-phone {
     font-size: 14px;
     font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .escalated-badge {
+    display: inline-block;
+    background: #e53935;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 10px;
+    letter-spacing: 0.3px;
   }
 
   .contact-preview {
@@ -97,10 +114,36 @@ HTML = """
     justify-content: center;
     font-weight: bold;
     font-size: 18px;
+    flex-shrink: 0;
   }
 
+  .header-info { flex: 1; }
   .header-info h2 { font-size: 16px; font-weight: 500; }
   .header-info span { font-size: 12px; color: #8696a0; }
+
+  .escalation-status {
+    font-size: 11px;
+    font-weight: 600;
+    color: #e53935;
+    margin-top: 2px;
+  }
+
+  .handoff-btn {
+    background: #e53935;
+    color: #fff;
+    border: none;
+    padding: 7px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+    flex-shrink: 0;
+  }
+
+  .handoff-btn:hover { background: #c62828; }
+  .handoff-btn.bot { background: #00a884; }
+  .handoff-btn.bot:hover { background: #00876d; }
 
   .messages {
     flex: 1;
@@ -219,7 +262,11 @@ HTML = """
     <div class="avatar" id="avatarLetter"></div>
     <div class="header-info">
       <h2 id="headerPhone"></h2>
+      <div class="escalation-status" id="escalationStatus" style="display:none;">
+        &#9888; Waiting for human response
+      </div>
     </div>
+    <button class="handoff-btn" id="handoffBtn" onclick="toggleHandoff()"></button>
   </div>
 
   <div class="messages" id="messages">
@@ -236,6 +283,7 @@ HTML = """
 
 <script>
   const allConversations = {};
+  const escalatedPhones = new Set();
   let activePhone = null;
 
   const contactList = document.getElementById("contactList");
@@ -243,26 +291,68 @@ HTML = """
   const chatHeader = document.getElementById("chatHeader");
   const headerPhone = document.getElementById("headerPhone");
   const avatarLetter = document.getElementById("avatarLetter");
+  const escalationStatus = document.getElementById("escalationStatus");
+  const handoffBtn = document.getElementById("handoffBtn");
 
+  // --- Audio alert (Web Audio API — no file dependency) ---
+  function playAlert() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      [0, 0.18].forEach(delay => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = "sine";
+        osc.frequency.value = 880;
+        gain.gain.setValueAtTime(0, ctx.currentTime + delay);
+        gain.gain.linearRampToValueAtTime(0.35, ctx.currentTime + delay + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.25);
+        osc.start(ctx.currentTime + delay);
+        osc.stop(ctx.currentTime + delay + 0.25);
+      });
+    } catch (_) {}
+  }
+
+  // --- Rendering ---
   function renderContacts() {
     contactList.innerHTML = "";
-    const phones = Object.keys(allConversations);
-    phones.forEach(phone => {
+    Object.keys(allConversations).forEach(phone => {
       const msgs = allConversations[phone];
       const last = msgs[msgs.length - 1];
+      const isEsc = escalatedPhones.has(phone);
+
       const div = document.createElement("div");
-      div.className = "contact" + (phone === activePhone ? " active" : "");
+      div.className = "contact" + (phone === activePhone ? " active" : "") + (isEsc ? " escalated" : "");
+
       const phoneDiv = document.createElement("div");
       phoneDiv.className = "contact-phone";
       phoneDiv.textContent = "+" + phone;
+
+      if (isEsc) {
+        const badge = document.createElement("span");
+        badge.className = "escalated-badge";
+        badge.textContent = "ESCALATED";
+        phoneDiv.appendChild(badge);
+      }
+
       const previewDiv = document.createElement("div");
       previewDiv.className = "contact-preview";
       previewDiv.textContent = last ? last.text : "";
+
       div.appendChild(phoneDiv);
       div.appendChild(previewDiv);
       div.onclick = () => selectChat(phone);
       contactList.appendChild(div);
     });
+  }
+
+  function renderHeader() {
+    if (!activePhone) return;
+    const isEsc = escalatedPhones.has(activePhone);
+    escalationStatus.style.display = isEsc ? "block" : "none";
+    handoffBtn.textContent = isEsc ? "Hand back to bot" : "Take over";
+    handoffBtn.className = "handoff-btn" + (isEsc ? " bot" : "");
   }
 
   function renderMessages() {
@@ -274,12 +364,12 @@ HTML = """
     chatHeader.style.display = "flex";
     headerPhone.textContent = "+" + activePhone;
     avatarLetter.textContent = activePhone.slice(-2);
+    renderHeader();
 
     container.innerHTML = "";
     allConversations[activePhone].forEach(msg => {
       const div = document.createElement("div");
-      const type = msg.sender === "user" ? "outgoing" : "incoming";
-      div.className = "msg " + type;
+      div.className = "msg " + (msg.sender === "user" ? "outgoing" : "incoming");
       div.textContent = msg.text;
       container.appendChild(div);
     });
@@ -293,33 +383,60 @@ HTML = """
     loadOrders();
   }
 
-  function addIncoming(msg) {
-    if (!allConversations[msg.phone]) {
-      allConversations[msg.phone] = [];
-    }
+  function addMessage(msg) {
+    if (!allConversations[msg.phone]) allConversations[msg.phone] = [];
     allConversations[msg.phone].push(msg);
     renderContacts();
-    if (msg.phone === activePhone) {
-      renderMessages();
-    }
+    if (msg.phone === activePhone) renderMessages();
   }
 
-  fetch("/history")
-    .then(r => r.json())
-    .then(data => {
-      Object.keys(data).forEach(phone => {
-        allConversations[phone] = data[phone];
-      });
-      renderContacts();
-      renderMessages();
-    });
+  function handleEscalation(event) {
+    const wasEscalated = escalatedPhones.has(event.phone);
+    if (event.escalated) {
+      escalatedPhones.add(event.phone);
+      if (!wasEscalated) playAlert();
+    } else {
+      escalatedPhones.delete(event.phone);
+    }
+    renderContacts();
+    if (event.phone === activePhone) renderHeader();
+  }
 
+  // --- Handoff toggle ---
+  function toggleHandoff() {
+    if (!activePhone) return;
+    const isEsc = escalatedPhones.has(activePhone);
+    fetch("/escalate/" + activePhone, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({escalated: !isEsc})
+    });
+  }
+
+  // --- Initial data load ---
+  Promise.all([
+    fetch("/history").then(r => r.json()),
+    fetch("/escalated").then(r => r.json()),
+  ]).then(([hist, esc]) => {
+    Object.keys(hist).forEach(phone => { allConversations[phone] = hist[phone]; });
+    esc.forEach(phone => escalatedPhones.add(phone));
+    renderContacts();
+    renderMessages();
+  });
+
+  // --- SSE ---
   const events = new EventSource("/events");
   events.onmessage = (e) => {
-    addIncoming(JSON.parse(e.data));
-    loadOrders();
+    const event = JSON.parse(e.data);
+    if (event.type === "escalation") {
+      handleEscalation(event);
+    } else {
+      addMessage(event);
+      loadOrders();
+    }
   };
 
+  // --- Orders panel ---
   const ordersList = document.getElementById("ordersList");
   const NEXT_STATUS = {
     "pending": "confirmed",
@@ -343,7 +460,7 @@ HTML = """
       return;
     }
     ordersList.innerHTML = "";
-    filtered.reverse().forEach(order => {
+    filtered.slice().reverse().forEach(order => {
       const items = order.items.map(i => i.name + " x" + i.qty).join(", ");
       const next = NEXT_STATUS[order.status];
       const card = document.createElement("div");
@@ -404,6 +521,15 @@ async def sse():
 @router.get("/history")
 async def history():
     return conversations
+
+@router.get("/escalated")
+async def get_escalated():
+    return list(escalated_phones)
+
+@router.post("/escalate/{phone}")
+async def set_escalation_endpoint(phone: str, body: dict):
+    await set_escalation(phone, bool(body.get("escalated", False)))
+    return {"phone": phone, "escalated": phone in escalated_phones}
 
 @router.get("/orders")
 async def get_orders():

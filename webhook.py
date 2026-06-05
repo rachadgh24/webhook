@@ -8,7 +8,7 @@ from cachetools import TTLCache
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, Query, Response, HTTPException
 from dotenv import load_dotenv
 from agent import get_ai_response
-from store import add_message, delivery_log, log_delivery
+from store import add_message, delivery_log, log_delivery, is_escalated
 
 load_dotenv()
 
@@ -103,6 +103,9 @@ async def process_inbound_message(sender_phone: str, msg: dict):
         user_text = msg["text"]["body"]
         await add_message(sender_phone, "user", user_text)
         log_delivery("inbound_stored", sender_phone, ok=True, detail=user_text[:120])
+        if is_escalated(sender_phone):
+            log_delivery("escalated_silence", sender_phone, ok=True, detail="human handoff active")
+            return
         try:
             result = await get_ai_response(sender_phone, user_text)
             log_delivery("ai_response", sender_phone, ok=True, detail=result["text"][:120])

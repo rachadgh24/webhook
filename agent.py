@@ -3,7 +3,8 @@ import json
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from tools import TOOL_DEFINITIONS, TOOL_HANDLERS, MENU_PHOTO_MEDIA_ID
-from guardrails import check_input, check_output, check_rate_limit, enforce_output_length
+from guardrails import check_input, check_output, check_rate_limit, enforce_output_length, should_escalate
+from store import set_escalation
 
 load_dotenv()
 
@@ -58,6 +59,13 @@ async def get_ai_response(phone: str, user_prompt: str):
     refusal = await check_input(user_prompt)
     if refusal:
         return {"text": refusal, "images": []}
+
+    if await should_escalate(user_prompt):
+        await set_escalation(phone, True)
+        return {
+            "text": "I'm connecting you with our team right away. A staff member will be with you shortly.",
+            "images": [],
+        }
 
     if phone not in chat_histories:
         chat_histories[phone] = [

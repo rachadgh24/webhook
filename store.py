@@ -7,6 +7,7 @@ orders = {}
 order_counter = 0
 delivery_log = []
 MAX_DELIVERY_LOG = 50
+escalated_phones: set[str] = set()
 
 
 def log_delivery(stage: str, phone: str | None = None, ok: bool = True, status_code: int | None = None, detail: str = ""):
@@ -28,11 +29,25 @@ def get_conversation(phone: str):
     return conversations[phone]
 
 
+def is_escalated(phone: str) -> bool:
+    return phone in escalated_phones
+
+
+async def set_escalation(phone: str, escalated: bool):
+    if escalated:
+        escalated_phones.add(phone)
+    else:
+        escalated_phones.discard(phone)
+    event = {"type": "escalation", "phone": phone, "escalated": escalated}
+    for queue in listeners:
+        await queue.put(event)
+
+
 async def add_message(phone: str, sender: str, text: str):
     msg = {"phone": phone, "sender": sender, "text": text}
     get_conversation(phone).append(msg)
     for queue in listeners:
-        await queue.put(msg)
+        await queue.put({"type": "message", **msg})
 
 
 def create_order(phone: str, items: list):
