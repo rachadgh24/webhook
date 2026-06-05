@@ -5,7 +5,6 @@ import time
 from collections import defaultdict, deque
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
-from tools import MENU, RESTAURANT_INFO
 
 load_dotenv()
 
@@ -154,18 +153,4 @@ def enforce_output_length(text: str) -> str:
 
 
 def check_output(response_text: str) -> str | None:
-    """Return a fallback string if the response contains a price not in the menu, else None."""
-    if not response_text:
-        return None
-    valid_prices = {
-        f"{item['price']:.2f}"
-        for items in MENU.values()
-        for item in items
-    } | {
-        f"{RESTAURANT_INFO['delivery_fee']:.2f}",
-        f"{RESTAURANT_INFO['minimum_order']:.2f}",
-    }
-    for raw in re.findall(r"\$(\d+(?:\.\d+)?)", response_text):
-        if f"{float(raw):.2f}" not in valid_prices:
-            return HALLUCINATION_RESPONSE
     return None
