@@ -49,8 +49,6 @@ def create_order(phone: str, items: list):
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
     }
     orders[order_id] = order
-    if phone not in orders:
-        pass
     return order
 
 

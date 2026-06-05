@@ -252,9 +252,14 @@ HTML = """
       const last = msgs[msgs.length - 1];
       const div = document.createElement("div");
       div.className = "contact" + (phone === activePhone ? " active" : "");
-      div.innerHTML =
-        '<div class="contact-phone">+' + phone + '</div>' +
-        '<div class="contact-preview">' + (last ? last.text : "") + '</div>';
+      const phoneDiv = document.createElement("div");
+      phoneDiv.className = "contact-phone";
+      phoneDiv.textContent = "+" + phone;
+      const previewDiv = document.createElement("div");
+      previewDiv.className = "contact-preview";
+      previewDiv.textContent = last ? last.text : "";
+      div.appendChild(phoneDiv);
+      div.appendChild(previewDiv);
       div.onclick = () => selectChat(phone);
       contactList.appendChild(div);
     });

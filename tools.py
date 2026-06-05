@@ -1,4 +1,3 @@
-import json as _json
 from store import create_order as _create_order, confirm_order as _confirm_order
 from store import get_order_status as _get_order_status, get_orders_by_phone as _get_orders_by_phone
 
@@ -108,10 +107,9 @@ def send_menu_photo():
     return "Menu photo has been sent to the client."
 
 
-def place_order(phone: str, items_json: str):
-    items_raw = _json.loads(items_json) if isinstance(items_json, str) else items_json
+def place_order(phone: str, items: list):
     resolved_items = []
-    for entry in items_raw:
+    for entry in items:
         name = entry.get("name", "")
         qty = entry.get("qty", 1)
         query = name.lower()
@@ -257,7 +255,18 @@ TOOL_DEFINITIONS = [
                 "type": "object",
                 "properties": {
                     "phone": {"type": "string", "description": "The client's phone number"},
-                    "items": {"type": "string", "description": "JSON array of items, e.g. [{\"name\": \"Grilled Salmon\", \"qty\": 2}, {\"name\": \"Water\", \"qty\": 1}]"},
+                    "items": {
+                        "type": "array",
+                        "description": "Items to order",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string", "description": "Menu item name"},
+                                "qty": {"type": "integer", "description": "Quantity (defaults to 1 if omitted)"},
+                            },
+                            "required": ["name"],
+                        },
+                    },
                 },
                 "required": ["phone", "items"],
             },

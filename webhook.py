@@ -1,18 +1,50 @@
+import hashlib
+import hmac
+import json
+import logging
 import os
 import httpx
-from fastapi import APIRouter, Request, Query, Response, HTTPException
+from cachetools import TTLCache
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, Query, Response, HTTPException
 from dotenv import load_dotenv
 from agent import get_ai_response
 from store import add_message, delivery_log, log_delivery
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+processed_messages = TTLCache(maxsize=10_000, ttl=600)
+http_client = httpx.AsyncClient()
+
 router = APIRouter()
 
-VERIFY_TOKEN = "my_secret_token_toto123"
+
+@router.on_event("shutdown")
+async def shutdown_http_client():
+    await http_client.aclose()
+
+VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
+META_APP_SECRET = os.getenv("META_APP_SECRET")
 
+
+def verify_x_hub_signature_256(body: bytes, signature_header: str | None, app_secret: str | None) -> bool:
+    if not signature_header or not app_secret:
+        return False
+    if not signature_header.startswith("sha256="):
+        return False
+    expected = signature_header.removeprefix("sha256=")
+    digest = hmac.new(app_secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(digest, expected)
+
+
+async def verify_meta_webhook(request: Request) -> bytes:
+    body = await request.body()
+    signature = request.headers.get("X-Hub-Signature-256")
+    if not verify_x_hub_signature_256(body, signature, META_APP_SECRET):
+        raise HTTPException(status_code=401, detail="Invalid or missing signature")
+    return body
 
 
 def _missing_whatsapp_config():
@@ -37,8 +69,7 @@ async def _send_whatsapp_payload(to_phone: str, payload: dict, stage: str):
         "Authorization": f"Bearer {WHATSAPP_TOKEN}",
         "Content-Type": "application/json",
     }
-    async with httpx.AsyncClient() as client:
-        response = await client.post(url, json=payload, headers=headers)
+    response = await http_client.post(url, json=payload, headers=headers)
 
     ok = response.is_success
     detail = response.text
@@ -66,6 +97,36 @@ async def send_whatsapp_image(to_phone: str, media_id: str, caption: str = ""):
     }
     return await _send_whatsapp_payload(to_phone, payload, "whatsapp_image_send")
 
+
+async def process_inbound_message(sender_phone: str, msg: dict):
+    if msg.get("type") == "text":
+        user_text = msg["text"]["body"]
+        await add_message(sender_phone, "user", user_text)
+        log_delivery("inbound_stored", sender_phone, ok=True, detail=user_text[:120])
+        try:
+            result = await get_ai_response(sender_phone, user_text)
+            log_delivery("ai_response", sender_phone, ok=True, detail=result["text"][:120])
+
+            await add_message(sender_phone, "assistant", result["text"])
+            await send_whatsapp_message(sender_phone, result["text"])
+
+            for img in result["images"]:
+                await add_message(sender_phone, "assistant", f"[Photo: {img['caption']}]")
+                await send_whatsapp_image(sender_phone, img["media_id"], img["caption"])
+        except Exception as ex:
+            detail = f"{type(ex).__name__}: {ex}"
+            log_delivery("agent_error", sender_phone, ok=False, detail=detail)
+            print(f"ERROR in agent: {detail}")
+            error_reply = "Sorry, something went wrong. Please try again."
+            await add_message(sender_phone, "assistant", error_reply)
+            await send_whatsapp_message(sender_phone, error_reply)
+    else:
+        reply = "I can only process text messages. Please send your request as text."
+        await add_message(sender_phone, "assistant", reply)
+        log_delivery("non_text_message", sender_phone, ok=True, detail=msg.get("type", "unknown"))
+        await send_whatsapp_message(sender_phone, reply)
+
+
 @router.get("/webhook")
 async def verify_webhook(
     mode: str = Query(None, alias="hub.mode"),
@@ -90,51 +151,23 @@ async def delivery_debug():
 
 
 @router.post("/webhook")
-async def receive_messages(request: Request):
-    """Handles incoming data/messages from Meta."""
-    payload = await request.json()
-    log_delivery("webhook_received", ok=True, detail=f"object={payload.get('object')}")
-    handled = False
-    entry = payload.get("entry", [])
-    for e in entry:
-        for change in e.get("changes", []):
-            value = change.get("value", {})
-            messages = value.get("messages", [])
-            if not messages:
-                field = change.get("field", "unknown")
-                log_delivery("no_inbound_messages", ok=True, detail=f"field={field}")
-                continue
+async def receive_messages(
+    background_tasks: BackgroundTasks,
+    body: bytes = Depends(verify_meta_webhook),
+):
+    """Acknowledge Meta webhooks quickly; process messages in the background."""
+    payload = json.loads(body)
+    for entry in payload.get("entry", []):
+        for change in entry.get("changes", []):
+            for msg in change.get("value", {}).get("messages", []):
+                wamid = msg.get("id")
+                if wamid and wamid in processed_messages:
+                    logger.warning("Duplicate webhook message ignored: wamid=%s", wamid)
+                    continue
 
-            for msg in messages:
-                handled = True
-                sender_phone = msg["from"]
-                if msg.get("type") == "text":
-                    user_text = msg["text"]["body"]
-                    await add_message(sender_phone, "user", user_text)
-                    log_delivery("inbound_stored", sender_phone, ok=True, detail=user_text[:120])
-                    try:
-                        result = await get_ai_response(sender_phone, user_text)
-                        log_delivery("ai_response", sender_phone, ok=True, detail=result["text"][:120])
+                if wamid:
+                    processed_messages[wamid] = True
 
-                        await add_message(sender_phone, "assistant", result["text"])
-                        await send_whatsapp_message(sender_phone, result["text"])
+                background_tasks.add_task(process_inbound_message, msg["from"], msg)
 
-                        for img in result["images"]:
-                            await add_message(sender_phone, "assistant", f"[Photo: {img['caption']}]")
-                            await send_whatsapp_image(sender_phone, img["media_id"], img["caption"])
-                    except Exception as ex:
-                        detail = f"{type(ex).__name__}: {ex}"
-                        log_delivery("agent_error", sender_phone, ok=False, detail=detail)
-                        print(f"ERROR in agent: {detail}")
-                        error_reply = "Sorry, something went wrong. Please try again."
-                        await add_message(sender_phone, "assistant", error_reply)
-                        await send_whatsapp_message(sender_phone, error_reply)
-                else:
-                    reply = "I can only process text messages. Please send your request as text."
-                    await add_message(sender_phone, "assistant", reply)
-                    log_delivery("non_text_message", sender_phone, ok=True, detail=msg.get("type", "unknown"))
-                    await send_whatsapp_message(sender_phone, reply)
-
-    if not handled:
-        log_delivery("no_handled_messages", ok=True, detail="Webhook payload had no message events")
     return {"status": "success"}
