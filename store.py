@@ -1,93 +1,92 @@
+import os
 import asyncio
 from datetime import datetime
+from supabase import create_client, Client
+from dotenv import load_dotenv
 
-conversations = {}
+load_dotenv()
+
+_supabase: Client = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
+
 listeners = []
-orders = {}
-order_counter = 0
-delivery_log = []
 MAX_DELIVERY_LOG = 50
-escalated_phones: set[str] = set()
 
 
 def log_delivery(stage: str, phone: str | None = None, ok: bool = True, status_code: int | None = None, detail: str = ""):
-    delivery_log.append({
+    _supabase.table("delivery_log").insert({
         "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "stage": stage,
         "phone": phone,
         "ok": ok,
         "status_code": status_code,
         "detail": detail,
-    })
-    if len(delivery_log) > MAX_DELIVERY_LOG:
-        delivery_log[:] = delivery_log[-MAX_DELIVERY_LOG:]
+    }).execute()
 
 
 def get_conversation(phone: str):
-    if phone not in conversations:
-        conversations[phone] = []
-    return conversations[phone]
+    result = _supabase.table("conversations").select("sender, text").eq("phone", phone).order("id").execute()
+    return [{"phone": phone, "sender": r["sender"], "text": r["text"]} for r in result.data]
 
 
 def is_escalated(phone: str) -> bool:
-    return phone in escalated_phones
+    result = _supabase.table("escalations").select("escalated").eq("phone", phone).maybe_single().execute()
+    return bool(result.data and result.data["escalated"])
 
 
 async def set_escalation(phone: str, escalated: bool):
-    if escalated:
-        escalated_phones.add(phone)
-    else:
-        escalated_phones.discard(phone)
+    _supabase.table("escalations").upsert({"phone": phone, "escalated": escalated}).execute()
     event = {"type": "escalation", "phone": phone, "escalated": escalated}
     for queue in listeners:
         await queue.put(event)
 
 
 async def add_message(phone: str, sender: str, text: str):
+    _supabase.table("conversations").insert({"phone": phone, "sender": sender, "text": text}).execute()
     msg = {"phone": phone, "sender": sender, "text": text}
-    get_conversation(phone).append(msg)
     for queue in listeners:
         await queue.put({"type": "message", **msg})
 
 
 def create_order(phone: str, items: list):
-    global order_counter
-    order_counter += 1
+    count_result = _supabase.table("orders").select("order_id", count="exact").execute()
+    order_counter = (count_result.count or 0) + 1
     order_id = f"ORD-{order_counter:04d}"
-    total = sum(item["price"] * item["qty"] for item in items)
+    total = round(sum(item["price"] * item["qty"] for item in items), 2)
     order = {
         "order_id": order_id,
         "phone": phone,
         "items": items,
-        "total": round(total, 2),
+        "total": total,
         "status": "pending",
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
     }
-    orders[order_id] = order
+    _supabase.table("orders").insert(order).execute()
     return order
 
 
 def confirm_order(order_id: str):
-    order = orders.get(order_id)
-    if not order:
+    result = _supabase.table("orders").select("*").eq("order_id", order_id).maybe_single().execute()
+    if not result.data:
         return None
-    if order["status"] != "pending":
-        return order
-    order["status"] = "confirmed"
-    return order
+    if result.data["status"] != "pending":
+        return result.data
+    _supabase.table("orders").update({"status": "confirmed"}).eq("order_id", order_id).execute()
+    return {**result.data, "status": "confirmed"}
 
 
 def get_order_status(order_id: str):
-    return orders.get(order_id)
+    result = _supabase.table("orders").select("*").eq("order_id", order_id).maybe_single().execute()
+    return result.data
 
 
 def get_orders_by_phone(phone: str):
-    return [o for o in orders.values() if o["phone"] == phone]
+    result = _supabase.table("orders").select("*").eq("phone", phone).execute()
+    return result.data
 
 
 def update_order_status(order_id: str, status: str):
-    order = orders.get(order_id)
-    if not order:
+    result = _supabase.table("orders").select("*").eq("order_id", order_id).maybe_single().execute()
+    if not result.data:
         return None
-    order["status"] = status
-    return order
+    _supabase.table("orders").update({"status": status}).eq("order_id", order_id).execute()
+    return {**result.data, "status": status}
