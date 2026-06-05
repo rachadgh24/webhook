@@ -52,8 +52,8 @@ def get_all_orders() -> list:
 
 
 def is_escalated(phone: str) -> bool:
-    result = _supabase.table("escalations").select("escalated").eq("phone", phone).maybe_single().execute()
-    return bool(result.data and result.data["escalated"])
+    result = _supabase.table("escalations").select("escalated").eq("phone", phone).execute()
+    return bool(result.data and result.data[0]["escalated"])
 
 
 async def set_escalation(phone: str, escalated: bool):
@@ -88,18 +88,19 @@ def create_order(phone: str, items: list):
 
 
 def confirm_order(order_id: str):
-    result = _supabase.table("orders").select("*").eq("order_id", order_id).maybe_single().execute()
+    result = _supabase.table("orders").select("*").eq("order_id", order_id).execute()
     if not result.data:
         return None
-    if result.data["status"] != "pending":
-        return result.data
+    order = result.data[0]
+    if order["status"] != "pending":
+        return order
     _supabase.table("orders").update({"status": "confirmed"}).eq("order_id", order_id).execute()
-    return {**result.data, "status": "confirmed"}
+    return {**order, "status": "confirmed"}
 
 
 def get_order_status(order_id: str):
-    result = _supabase.table("orders").select("*").eq("order_id", order_id).maybe_single().execute()
-    return result.data
+    result = _supabase.table("orders").select("*").eq("order_id", order_id).execute()
+    return result.data[0] if result.data else None
 
 
 def get_orders_by_phone(phone: str):
@@ -108,8 +109,8 @@ def get_orders_by_phone(phone: str):
 
 
 def update_order_status(order_id: str, status: str):
-    result = _supabase.table("orders").select("*").eq("order_id", order_id).maybe_single().execute()
+    result = _supabase.table("orders").select("*").eq("order_id", order_id).execute()
     if not result.data:
         return None
     _supabase.table("orders").update({"status": status}).eq("order_id", order_id).execute()
-    return {**result.data, "status": status}
+    return {**result.data[0], "status": status}
