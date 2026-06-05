@@ -60,6 +60,14 @@ def save_chat_history(phone: str, messages: list) -> None:
     _supabase.table("chat_histories").upsert({"phone": phone, "messages": messages}).execute()
 
 
+def append_to_chat_history(phone: str, message: dict) -> None:
+    history = load_chat_history(phone)
+    if not history:
+        return
+    history.append(message)
+    save_chat_history(phone, history)
+
+
 def is_escalated(phone: str) -> bool:
     result = _supabase.table("escalations").select("escalated").eq("phone", phone).execute()
     return bool(result.data and result.data[0]["escalated"])
@@ -67,6 +75,11 @@ def is_escalated(phone: str) -> bool:
 
 async def set_escalation(phone: str, escalated: bool):
     _supabase.table("escalations").upsert({"phone": phone, "escalated": escalated}).execute()
+    if escalated:
+        note = "A human agent has taken over this conversation. Do not send any responses until the conversation is handed back to you."
+    else:
+        note = "The human agent has finished and handed the conversation back to you. Resume assisting the customer normally. You have full context of what the agent said above."
+    append_to_chat_history(phone, {"role": "system", "content": note})
     event = {"type": "escalation", "phone": phone, "escalated": escalated}
     for queue in listeners:
         await queue.put(event)
