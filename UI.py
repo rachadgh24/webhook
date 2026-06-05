@@ -441,7 +441,8 @@ HTML = """
 
       const label = document.createElement("div");
       label.className   = "msg-label";
-      label.textContent = isCustomer ? "Customer" : (msg.sender === "assistant" ? "Bot / Admin" : msg.sender);
+      const senderLabel = { user: "Customer", assistant: "Bot", admin: "Admin" };
+      label.textContent = senderLabel[msg.sender] || msg.sender;
 
       const bubble = document.createElement("div");
       bubble.className  = "msg " + (isCustomer ? "from-customer" : "from-restaurant");
@@ -625,7 +626,7 @@ async def admin_reply(phone: str, body: dict):
     text = body.get("text", "").strip()
     if not text:
         return {"error": "Empty message"}
-    await add_message(phone, "assistant", text)
+    await add_message(phone, "admin", text)
     await send_whatsapp_message(phone, text)
     return {"ok": True}
 
