@@ -33,6 +33,24 @@ def get_conversation(phone: str):
     return [{"phone": phone, "sender": r["sender"], "text": r["text"]} for r in result.data]
 
 
+def get_all_conversations() -> dict:
+    result = _supabase.table("conversations").select("phone, sender, text").order("id").execute()
+    grouped: dict = {}
+    for r in result.data:
+        grouped.setdefault(r["phone"], []).append({"phone": r["phone"], "sender": r["sender"], "text": r["text"]})
+    return grouped
+
+
+def get_escalated_phones() -> list:
+    result = _supabase.table("escalations").select("phone").eq("escalated", True).execute()
+    return [r["phone"] for r in result.data]
+
+
+def get_all_orders() -> list:
+    result = _supabase.table("orders").select("*").execute()
+    return result.data
+
+
 def is_escalated(phone: str) -> bool:
     result = _supabase.table("escalations").select("escalated").eq("phone", phone).maybe_single().execute()
     return bool(result.data and result.data["escalated"])

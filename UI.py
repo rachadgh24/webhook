@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
-from store import conversations, listeners, orders, update_order_status, escalated_phones, set_escalation, add_message
+from store import listeners, get_all_conversations, get_all_orders, get_escalated_phones, update_order_status, set_escalation, add_message, is_escalated
 from webhook import send_whatsapp_message
 import asyncio, json
 from starlette.responses import StreamingResponse
@@ -610,16 +610,16 @@ async def sse():
 
 @router.get("/history")
 async def history():
-    return conversations
+    return get_all_conversations()
 
 @router.get("/escalated")
 async def get_escalated():
-    return list(escalated_phones)
+    return get_escalated_phones()
 
 @router.post("/escalate/{phone}")
 async def set_escalation_endpoint(phone: str, body: dict):
     await set_escalation(phone, bool(body.get("escalated", False)))
-    return {"phone": phone, "escalated": phone in escalated_phones}
+    return {"phone": phone, "escalated": is_escalated(phone)}
 
 @router.post("/admin-reply/{phone}")
 async def admin_reply(phone: str, body: dict):
@@ -632,7 +632,7 @@ async def admin_reply(phone: str, body: dict):
 
 @router.get("/orders")
 async def get_orders():
-    return list(orders.values())
+    return get_all_orders()
 
 @router.post("/orders/{order_id}/status")
 async def set_order_status(order_id: str, body: dict):
