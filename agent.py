@@ -3,7 +3,7 @@ import json
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from tools import TOOL_DEFINITIONS, TOOL_HANDLERS, MENU_PHOTO_MEDIA_ID
-from guardrails import check_input, check_output
+from guardrails import check_input, check_output, check_rate_limit, enforce_output_length
 
 load_dotenv()
 
@@ -51,6 +51,10 @@ IMAGE_TOOLS = {
 
 
 async def get_ai_response(phone: str, user_prompt: str):
+    rate_refusal = check_rate_limit(phone)
+    if rate_refusal:
+        return {"text": rate_refusal, "images": []}
+
     refusal = await check_input(user_prompt)
     if refusal:
         return {"text": refusal, "images": []}
@@ -76,6 +80,7 @@ async def get_ai_response(phone: str, user_prompt: str):
 
         if not msg.tool_calls:
             text = check_output(msg.content) or msg.content
+            text = enforce_output_length(text)
             history.append({"role": "assistant", "content": text})
             return {"text": text, "images": images_to_send}
 

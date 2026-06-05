@@ -1,6 +1,8 @@
 import re
 import json
 import os
+import time
+from collections import defaultdict, deque
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
 from tools import MENU, RESTAURANT_INFO
@@ -71,6 +73,38 @@ async def check_input(user_input: str) -> str | None:
     if category in ("jailbreak", "off_topic"):
         return OFF_TOPIC_RESPONSE
     return None
+
+
+_RATE_LIMIT_RESPONSE = "You're sending messages too quickly. Please wait a moment before trying again."
+_MAX_REQUESTS = 10
+_WINDOW_SECONDS = 60
+
+# asyncio is single-threaded so plain dict + deque is safe between coroutines.
+_request_timestamps: dict[str, deque] = defaultdict(deque)
+
+
+def check_rate_limit(phone: str) -> str | None:
+    """Return a refusal string if the phone exceeds 10 requests per 60-second sliding window, else None."""
+    now = time.monotonic()
+    window = _request_timestamps[phone]
+    while window and now - window[0] > _WINDOW_SECONDS:
+        window.popleft()
+    if len(window) >= _MAX_REQUESTS:
+        return _RATE_LIMIT_RESPONSE
+    window.append(now)
+    return None
+
+
+_MAX_RESPONSE_CHARS = 600
+
+
+def enforce_output_length(text: str) -> str:
+    """Truncate text to _MAX_RESPONSE_CHARS at the last complete word boundary."""
+    if len(text) <= _MAX_RESPONSE_CHARS:
+        return text
+    cut = text[:_MAX_RESPONSE_CHARS]
+    last_space = cut.rfind(" ")
+    return cut[:last_space].rstrip() if last_space > 0 else cut
 
 
 def check_output(response_text: str) -> str | None:
