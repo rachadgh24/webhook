@@ -56,7 +56,7 @@ async def _classify(text: str) -> str:
                 {"role": "system", "content": _CLASSIFIER_SYSTEM},
                 {"role": "user", "content": f"<message>\n{text}\n</message>"},
             ],
-            max_tokens=20,
+            max_completion_tokens=20,
             temperature=0,
         )
         raw = response.choices[0].message.content.strip()
@@ -93,7 +93,7 @@ async def should_escalate(text: str) -> bool:
                 {"role": "system", "content": _ESCALATION_SYSTEM},
                 {"role": "user", "content": f"<message>\n{text}\n</message>"},
             ],
-            max_tokens=20,
+            max_completion_tokens=20,
             temperature=0,
         )
         raw = response.choices[0].message.content.strip()
