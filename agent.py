@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from tools import TOOL_DEFINITIONS, TOOL_HANDLERS, MENU_PHOTO_MEDIA_ID
 from guardrails import check_input, check_output, check_rate_limit, enforce_output_length, should_escalate
-from store import set_escalation
+from store import set_escalation, load_chat_history, save_chat_history
 
 load_dotenv()
 
@@ -31,8 +31,6 @@ SYSTEM_PROMPT = (
     "### TONE\n"
     "Professional but not too formal or rude, precise, and brief. No emojis, no personality."
 )
-
-chat_histories = {}
 
 MAX_HISTORY_MESSAGES = 10
 MAX_TOOL_ROUNDS = 5
@@ -71,13 +69,13 @@ async def get_ai_response(phone: str, user_prompt: str):
     if refusal:
         return {"text": refusal, "images": []}
 
-    if phone not in chat_histories:
-        chat_histories[phone] = [
+    history = load_chat_history(phone)
+    if not history:
+        history = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "system", "content": f"The current client's phone number is: {phone}"},
         ]
 
-    history = chat_histories[phone]
     history.append({"role": "user", "content": user_prompt})
     _trim_history(history)
     images_to_send = []
@@ -94,6 +92,7 @@ async def get_ai_response(phone: str, user_prompt: str):
             text = check_output(msg.content) or msg.content
             text = enforce_output_length(text)
             history.append({"role": "assistant", "content": text})
+            save_chat_history(phone, history)
             return {"text": text, "images": images_to_send}
 
         history.append(msg.model_dump(exclude_none=True))
@@ -119,4 +118,5 @@ async def get_ai_response(phone: str, user_prompt: str):
 
     fallback = "Sorry, I couldn't process your request. Please try again."
     history.append({"role": "assistant", "content": fallback})
+    save_chat_history(phone, history)
     return {"text": fallback, "images": []}

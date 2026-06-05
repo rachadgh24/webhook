@@ -51,6 +51,15 @@ def get_all_orders() -> list:
     return result.data
 
 
+def load_chat_history(phone: str) -> list:
+    result = _supabase.table("chat_histories").select("messages").eq("phone", phone).execute()
+    return result.data[0]["messages"] if result.data else []
+
+
+def save_chat_history(phone: str, messages: list) -> None:
+    _supabase.table("chat_histories").upsert({"phone": phone, "messages": messages}).execute()
+
+
 def is_escalated(phone: str) -> bool:
     result = _supabase.table("escalations").select("escalated").eq("phone", phone).execute()
     return bool(result.data and result.data[0]["escalated"])

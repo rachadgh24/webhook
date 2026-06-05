@@ -1,3 +1,4 @@
+import re as _re
 from store import create_order as _create_order, confirm_order as _confirm_order
 from store import get_order_status as _get_order_status, get_orders_by_phone as _get_orders_by_phone
 
@@ -112,6 +113,11 @@ def place_order(phone: str, items: list):
     for entry in items:
         name = entry.get("name", "")
         qty = entry.get("qty", 1)
+        # Handle model passing qty inside the name, e.g. "56 grilled chickens" with qty=1
+        m = _re.match(r'^(\d+)\s+(.+)$', name.strip())
+        if m and qty == 1:
+            qty = int(m.group(1))
+            name = m.group(2)
         query = name.lower()
         found = False
         for menu_items in MENU.values():
