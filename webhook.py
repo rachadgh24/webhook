@@ -8,7 +8,7 @@ from cachetools import TTLCache
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, Query, Response, HTTPException
 from dotenv import load_dotenv
 from agent import get_ai_response
-from store import add_message, delivery_log, log_delivery, is_escalated
+from store import add_message, get_delivery_log, log_delivery, is_escalated
 
 load_dotenv()
 
@@ -149,7 +149,7 @@ async def delivery_debug():
     return {
         "phone_number_id_set": bool(PHONE_NUMBER_ID),
         "whatsapp_token_set": bool(WHATSAPP_TOKEN),
-        "attempts": list(reversed(delivery_log)),
+        "attempts": get_delivery_log(),
     }
 
 

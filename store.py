@@ -23,6 +23,11 @@ def log_delivery(stage: str, phone: str | None = None, ok: bool = True, status_c
     }).execute()
 
 
+def get_delivery_log():
+    result = _supabase.table("delivery_log").select("*").order("id", desc=True).limit(MAX_DELIVERY_LOG).execute()
+    return result.data
+
+
 def get_conversation(phone: str):
     result = _supabase.table("conversations").select("sender, text").eq("phone", phone).order("id").execute()
     return [{"phone": phone, "sender": r["sender"], "text": r["text"]} for r in result.data]
