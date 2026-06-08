@@ -1,4 +1,5 @@
 import re as _re
+import difflib as _difflib
 from store import create_order as _create_order, confirm_order as _confirm_order
 from store import get_order_status as _get_order_status, get_orders_by_phone as _get_orders_by_phone
 from store import get_active_order_by_phone as _get_active_order_by_phone, add_items_to_order as _add_items_to_order
@@ -26,7 +27,7 @@ MENU = {
         {"name": "Ice Cream", "price": 4.50, "description": "Three scoops, choice of vanilla, chocolate, or strawberry"},
     ],
     "drinks": [
-        {"name": "Water", "price": 1.50, "description": "Still or sparkling"},
+        {"name": "Water", "price": 1.50, "description": "Bottled water"},
         {"name": "Soft Drink", "price": 2.50, "description": "Coca-Cola, Fanta, Sprite"},
         {"name": "Fresh Juice", "price": 4.00, "description": "Orange, apple, or mango"},
         {"name": "Coffee", "price": 3.00, "description": "Espresso, americano, or latte"},
@@ -54,6 +55,26 @@ RESTAURANT_INFO = {
 
 # --- Tool handler functions ---
 
+def _find_menu_item(query: str):
+    """Exact match first, then fuzzy match for typos (cutoff 0.6).
+    'watter' → Water (0.91), but 'sparkling water' → None (0.50)."""
+    q = query.strip().lower()
+    flat = [item for items in MENU.values() for item in items]
+    names_lower = [item["name"].lower() for item in flat]
+
+    # Exact match
+    for i, name in enumerate(names_lower):
+        if name == q:
+            return flat[i]
+
+    # Fuzzy match — handles typos without matching unrelated strings
+    matches = _difflib.get_close_matches(q, names_lower, n=1, cutoff=0.6)
+    if matches:
+        return flat[names_lower.index(matches[0])]
+
+    return None
+
+
 def get_full_menu():
     lines = []
     for category, items in MENU.items():
@@ -74,13 +95,10 @@ def get_category_menu(category: str):
 
 
 def check_price(item_name: str):
-    query = item_name.lower()
-    for items in MENU.values():
-        for item in items:
-            name = item["name"].lower()
-            if name == query or name in query or query in name:
-                return f"{item['name']}: ${item['price']:.2f}"
-    return f"Item '{item_name}' not found on the menu. Use get_full_menu to see available items."
+    item = _find_menu_item(item_name)
+    if item:
+        return f"{item['name']}: ${item['price']:.2f}"
+    return f"'{item_name}' is not on the menu. Use get_full_menu to see all available items."
 
 
 def get_restaurant_hours():
@@ -121,19 +139,10 @@ def place_order(phone: str, items: list):
         if m and qty == 1:
             qty = int(m.group(1))
             name = m.group(2)
-        query = name.lower()
-        found = False
-        for menu_items in MENU.values():
-            for item in menu_items:
-                menu_name = item["name"].lower()
-                if menu_name == query or menu_name in query or query in menu_name:
-                    resolved_items.append({"name": item["name"], "qty": qty, "price": item["price"]})
-                    found = True
-                    break
-            if found:
-                break
-        if not found:
-            return f"Item '{name}' not found on the menu. Please check the menu and try again."
+        item = _find_menu_item(name)
+        if not item:
+            return f"'{name}' is not on the menu. Please check the menu and try again."
+        resolved_items.append({"name": item["name"], "qty": qty, "price": item["price"]})
 
     active = _get_active_order_by_phone(phone)
     if active:
@@ -196,24 +205,15 @@ def edit_client_order(phone: str, edits: list):
         qty = edit.get("qty", 1)
 
         if action == "add":
-            query = name.lower()
-            found = False
-            for menu_items in MENU.values():
-                for item in menu_items:
-                    menu_name = item["name"].lower()
-                    if menu_name == query or menu_name in query or query in menu_name:
-                        operations.append({"action": "add", "name": item["name"], "qty": qty, "price": item["price"]})
-                        found = True
-                        break
-                if found:
-                    break
-            if not found:
-                return f"Item '{name}' not found on the menu."
+            item = _find_menu_item(name)
+            if not item:
+                return f"'{name}' is not on the menu."
+            operations.append({"action": "add", "name": item["name"], "qty": qty, "price": item["price"]})
 
         elif action in ("remove", "set_qty"):
-            query = name.lower()
+            query = name.strip().lower()
             matched = next(
-                (i["name"] for i in order["items"] if i["name"].lower() == query or query in i["name"].lower() or i["name"].lower() in query),
+                (i["name"] for i in order["items"] if i["name"].lower() == query),
                 None,
             )
             if not matched:
