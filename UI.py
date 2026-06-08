@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
-from store import listeners, get_all_conversations, get_all_orders, get_escalated_phones, update_order_status, set_escalation, add_message, is_escalated, append_to_chat_history, update_last_admin_reply
+from store import listeners, get_all_conversations, get_all_orders, get_escalated_phones, update_order_status, hide_order, set_escalation, add_message, is_escalated, append_to_chat_history, update_last_admin_reply
 from webhook import send_whatsapp_message
 import asyncio, json
 from starlette.responses import StreamingResponse
@@ -257,7 +257,24 @@ HTML = """
     border-radius: 8px;
     padding: 12px;
     margin-bottom: 8px;
+    position: relative;
   }
+
+  .order-dismiss {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: none;
+    border: none;
+    color: #8696a0;
+    cursor: pointer;
+    padding: 2px;
+    line-height: 1;
+    font-size: 14px;
+    opacity: 0.6;
+    transition: opacity 0.15s, color 0.15s;
+  }
+  .order-dismiss:hover { opacity: 1; color: #ef4444; }
 
   .order-id { font-weight: 600; font-size: 13px; color: #00a884; }
   .order-items { font-size: 12px; color: #8696a0; margin: 6px 0; }
@@ -561,6 +578,17 @@ HTML = """
         '<div class="order-time">'  + order.created_at + '</div>' +
         '<span class="order-status status-' + order.status + '">' +
           order.status.replace("_", " ") + '</span><br>';
+      if (order.status === "delivered") {
+        const trash = document.createElement("button");
+        trash.className = "order-dismiss";
+        trash.title = "Hide order";
+        trash.innerHTML = "&#128465;";
+        trash.addEventListener("click", () => {
+          fetch("/orders/" + order.order_id + "/hide", {method: "POST"})
+            .then(() => loadOrders());
+        });
+        card.appendChild(trash);
+      }
       if (next) {
         const btn = document.createElement("button");
         btn.className = "status-btn";
@@ -639,6 +667,13 @@ async def get_orders():
 @router.post("/orders/{order_id}/status")
 async def set_order_status(order_id: str, body: dict):
     result = update_order_status(order_id, body["status"])
+    if not result:
+        return {"error": "Order not found"}
+    return result
+
+@router.post("/orders/{order_id}/hide")
+async def hide_order_endpoint(order_id: str):
+    result = hide_order(order_id)
     if not result:
         return {"error": "Order not found"}
     return result

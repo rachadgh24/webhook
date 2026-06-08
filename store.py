@@ -47,8 +47,16 @@ def get_escalated_phones() -> list:
 
 
 def get_all_orders() -> list:
-    result = _supabase.table("orders").select("*").execute()
+    result = _supabase.table("orders").select("*").eq("hidden", False).execute()
     return result.data
+
+
+def hide_order(order_id: str):
+    result = _supabase.table("orders").select("*").eq("order_id", order_id).execute()
+    if not result.data:
+        return None
+    _supabase.table("orders").update({"hidden": True}).eq("order_id", order_id).execute()
+    return {"ok": True}
 
 
 HISTORY_WINDOW_HOURS = 12
