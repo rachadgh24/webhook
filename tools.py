@@ -1,6 +1,9 @@
 import re as _re
 from store import create_order as _create_order, confirm_order as _confirm_order
 from store import get_order_status as _get_order_status, get_orders_by_phone as _get_orders_by_phone
+from store import get_active_order_by_phone as _get_active_order_by_phone, add_items_to_order as _add_items_to_order
+from store import get_editable_order_by_phone as _get_editable_order_by_phone, edit_order as _edit_order
+from store import get_client as _get_client, save_client as _save_client
 
 MENU_PHOTO_MEDIA_ID = "2017954492405428"
 
@@ -132,8 +135,13 @@ def place_order(phone: str, items: list):
         if not found:
             return f"Item '{name}' not found on the menu. Please check the menu and try again."
 
-    order = _create_order(phone, resolved_items)
-    lines = [f"Order {order['order_id']} created:"]
+    active = _get_active_order_by_phone(phone)
+    if active:
+        order = _add_items_to_order(active["order_id"], resolved_items)
+        lines = [f"Items added to existing order {order['order_id']}:"]
+    else:
+        order = _create_order(phone, resolved_items)
+        lines = [f"Order {order['order_id']} created:"]
     for item in order["items"]:
         lines.append(f"  - {item['name']} x{item['qty']} = ${item['price'] * item['qty']:.2f}")
     lines.append(f"Total: ${order['total']:.2f}")
@@ -147,8 +155,19 @@ def confirm_client_order(order_id: str):
     if not order:
         return f"Order {order_id} not found."
     if order["status"] == "confirmed":
-        return f"Order {order_id} is confirmed. Total: ${order['total']:.2f}. It will be prepared shortly."
+        msg = f"Order {order_id} is confirmed. Total: ${order['total']:.2f}. It will be prepared shortly."
+        client = _get_client(order["phone"])
+        if client:
+            msg += f"\nSaved delivery address: {client['address']}. Ask the client to confirm this address (e.g. 'Delivering to {client['address']}, correct?'). If they provide a different address, call save_client_info to update it."
+        else:
+            msg += "\nNo delivery info on file. Ask the client for their full name and delivery address in one message, then call save_client_info."
+        return msg
     return f"Order {order_id} cannot be confirmed. Current status: {order['status']}."
+
+
+def save_client_info(phone: str, name: str, address: str):
+    _save_client(phone, name, address)
+    return f"Client info saved. Name: {name}, Address: {address}."
 
 
 def check_client_order_status(phone: str):
@@ -165,6 +184,58 @@ def check_client_order_status(phone: str):
     return "\n".join(lines)
 
 
+def edit_client_order(phone: str, edits: list):
+    order = _get_editable_order_by_phone(phone)
+    if not order:
+        return "No editable order found. Orders can only be edited when they are pending or confirmed."
+
+    operations = []
+    for edit in edits:
+        action = edit.get("action")
+        name = edit.get("name", "")
+        qty = edit.get("qty", 1)
+
+        if action == "add":
+            query = name.lower()
+            found = False
+            for menu_items in MENU.values():
+                for item in menu_items:
+                    menu_name = item["name"].lower()
+                    if menu_name == query or menu_name in query or query in menu_name:
+                        operations.append({"action": "add", "name": item["name"], "qty": qty, "price": item["price"]})
+                        found = True
+                        break
+                if found:
+                    break
+            if not found:
+                return f"Item '{name}' not found on the menu."
+
+        elif action in ("remove", "set_qty"):
+            query = name.lower()
+            matched = next(
+                (i["name"] for i in order["items"] if i["name"].lower() == query or query in i["name"].lower() or i["name"].lower() in query),
+                None,
+            )
+            if not matched:
+                return f"Item '{name}' not found in the order."
+            if action == "set_qty" and qty < 1:
+                return f"Quantity must be at least 1. Use 'remove' to delete an item."
+            operations.append({"action": action, "name": matched, "qty": qty})
+
+        else:
+            return f"Unknown edit action '{action}'. Use 'add', 'remove', or 'set_qty'."
+
+    updated = _edit_order(order["order_id"], operations)
+    if not updated["items"]:
+        return f"Order {order['order_id']} now has no items. Add something or it will remain empty."
+    lines = [f"Order {updated['order_id']} updated:"]
+    for item in updated["items"]:
+        lines.append(f"  - {item['name']} x{item['qty']} = ${item['price'] * item['qty']:.2f}")
+    lines.append(f"Total: ${updated['total']:.2f}")
+    lines.append(f"Status: {updated['status']}")
+    return "\n".join(lines)
+
+
 # --- Map function names to handlers ---
 
 TOOL_HANDLERS = {
@@ -178,6 +249,8 @@ TOOL_HANDLERS = {
     "place_order": lambda args: place_order(args["phone"], args["items"]),
     "confirm_order": lambda args: confirm_client_order(args["order_id"]),
     "check_order_status": lambda args: check_client_order_status(args["phone"]),
+    "edit_order": lambda args: edit_client_order(args["phone"], args["edits"]),
+    "save_client_info": lambda args: save_client_info(args["phone"], args["name"], args["address"]),
 }
 
 
@@ -303,6 +376,49 @@ TOOL_DEFINITIONS = [
                     "phone": {"type": "string", "description": "The client's phone number"},
                 },
                 "required": ["phone"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_order",
+            "description": "Edits the client's current order (pending or confirmed only). Use when the client wants to remove an item, add an item, or change an item's quantity. Not allowed once the order is preparing, on the way, or delivered.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "phone": {"type": "string", "description": "The client's phone number"},
+                    "edits": {
+                        "type": "array",
+                        "description": "List of edit operations to apply",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "action": {"type": "string", "enum": ["add", "remove", "set_qty"], "description": "'add' to add a new item or increase qty, 'remove' to delete an item, 'set_qty' to change an item's quantity"},
+                                "name": {"type": "string", "description": "The menu item name"},
+                                "qty": {"type": "integer", "description": "Quantity — required for 'add' and 'set_qty', ignored for 'remove'"},
+                            },
+                            "required": ["action", "name"],
+                        },
+                    },
+                },
+                "required": ["phone", "edits"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_client_info",
+            "description": "Saves the client's full name and delivery address. Call this after collecting the client's name and address following an order confirmation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "phone": {"type": "string", "description": "The client's phone number"},
+                    "name": {"type": "string", "description": "The client's full name"},
+                    "address": {"type": "string", "description": "The client's full delivery address"},
+                },
+                "required": ["phone", "name", "address"],
             },
         },
     },

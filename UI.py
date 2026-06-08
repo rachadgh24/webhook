@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
-from store import listeners, get_all_conversations, get_all_orders, get_escalated_phones, update_order_status, set_escalation, add_message, is_escalated, append_to_chat_history
+from store import listeners, get_all_conversations, get_all_orders, get_escalated_phones, update_order_status, set_escalation, add_message, is_escalated, append_to_chat_history, update_last_admin_reply
 from webhook import send_whatsapp_message
 import asyncio, json
 from starlette.responses import StreamingResponse
@@ -628,6 +628,7 @@ async def admin_reply(phone: str, body: dict):
         return {"error": "Empty message"}
     await add_message(phone, "admin", text)
     append_to_chat_history(phone, {"role": "assistant", "content": f"[Human agent]: {text}"})
+    update_last_admin_reply(phone)
     await send_whatsapp_message(phone, text)
     return {"ok": True}
 
