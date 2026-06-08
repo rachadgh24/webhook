@@ -144,9 +144,9 @@ def place_order(phone: str, items: list):
             return f"'{name}' is not on the menu. Please check the menu and try again."
         resolved_items.append({"name": item["name"], "qty": qty, "price": item["price"]})
 
-    active = _get_active_order_by_phone(phone)
-    if active:
-        order = _add_items_to_order(active["order_id"], resolved_items)
+    editable = _get_editable_order_by_phone(phone)
+    if editable:
+        order = _add_items_to_order(editable["order_id"], resolved_items)
         lines = [f"Items added to existing order {order['order_id']}:"]
     else:
         order = _create_order(phone, resolved_items)
