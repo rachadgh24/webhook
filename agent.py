@@ -76,16 +76,6 @@ async def get_ai_response(phone: str, user_prompt: str):
     if rate_refusal:
         return {"text": rate_refusal, "images": []}
 
-    result = await classify_input(user_prompt)
-    if result["escalate"]:
-        await set_escalation(phone, True)
-        return {
-            "text": "I'm connecting you with our team right away. A staff member will be with you shortly.",
-            "images": [],
-        }
-    if result["refusal"]:
-        return {"text": result["refusal"], "images": []}
-
     history = load_chat_history(phone)
     if not history:
         history = [
@@ -95,6 +85,21 @@ async def get_ai_response(phone: str, user_prompt: str):
     else:
         # Refresh client context on every turn so name/address changes are reflected immediately.
         history[1] = {"role": "system", "content": _build_client_context(phone)}
+
+    last_bot_message = next(
+        (m["content"] for m in reversed(history) if m.get("role") == "assistant"),
+        None,
+    )
+
+    result = await classify_input(user_prompt, last_bot_message)
+    if result["escalate"]:
+        await set_escalation(phone, True)
+        return {
+            "text": "I'm connecting you with our team right away. A staff member will be with you shortly.",
+            "images": [],
+        }
+    if result["refusal"]:
+        return {"text": result["refusal"], "images": []}
 
     history.append({"role": "user", "content": user_prompt})
     _trim_history(history)
