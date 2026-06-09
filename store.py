@@ -55,10 +55,12 @@ def get_escalated_phones() -> list:
 
 @observe
 def load_menu() -> dict:
-    result = _supabase.table("items").select("*").eq("active", True).order("id").execute()
+    cats = _supabase.table("categories").select("id, name").eq("active", True).order("display_order").execute()
+    cat_map = {c["id"]: c["name"] for c in cats.data}
+    result = _supabase.table("items").select("*").eq("active", True).order("display_order").execute()
     menu = {}
     for row in result.data:
-        category = row["category"]
+        category = cat_map.get(row["category_id"], "other")
         if category not in menu:
             menu[category] = []
         menu[category].append({
