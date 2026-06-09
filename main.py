@@ -38,3 +38,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.include_router(webhook_router)
 app.include_router(ui_router)
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}

@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
+from langfuse.decorators import observe
 from store import listeners, get_all_conversations, get_all_orders, get_escalated_phones, update_order_status, hide_order, set_escalation, add_message, is_escalated, append_to_chat_history, update_last_admin_reply
 from webhook import send_whatsapp_message
 import asyncio, json
@@ -632,24 +633,31 @@ async def sse():
                 msg = await queue.get()
                 yield f"data: {json.dumps(msg)}\n\n"
         finally:
-            listeners.remove(queue)
+            try:
+                listeners.remove(queue)
+            except ValueError:
+                pass
 
     return StreamingResponse(stream(), media_type="text/event-stream")
 
 @router.get("/history")
+@observe
 async def history():
     return get_all_conversations()
 
 @router.get("/escalated")
+@observe
 async def get_escalated():
     return get_escalated_phones()
 
 @router.post("/escalate/{phone}")
+@observe
 async def set_escalation_endpoint(phone: str, body: dict):
     await set_escalation(phone, bool(body.get("escalated", False)))
     return {"phone": phone, "escalated": is_escalated(phone)}
 
 @router.post("/admin-reply/{phone}")
+@observe
 async def admin_reply(phone: str, body: dict):
     text = body.get("text", "").strip()
     if not text:
@@ -661,10 +669,12 @@ async def admin_reply(phone: str, body: dict):
     return {"ok": True}
 
 @router.get("/orders")
+@observe
 async def get_orders():
     return get_all_orders()
 
 @router.post("/orders/{order_id}/status")
+@observe
 async def set_order_status(order_id: str, body: dict):
     result = update_order_status(order_id, body["status"])
     if not result:
@@ -672,6 +682,7 @@ async def set_order_status(order_id: str, body: dict):
     return result
 
 @router.post("/orders/{order_id}/hide")
+@observe
 async def hide_order_endpoint(order_id: str):
     result = hide_order(order_id)
     if not result:

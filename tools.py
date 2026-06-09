@@ -1,38 +1,16 @@
 import re as _re
 import difflib as _difflib
+from langfuse.decorators import observe
 from store import create_order as _create_order, confirm_order as _confirm_order
 from store import get_order_status as _get_order_status, get_orders_by_phone as _get_orders_by_phone
 from store import get_active_order_by_phone as _get_active_order_by_phone, add_items_to_order as _add_items_to_order
 from store import get_editable_order_by_phone as _get_editable_order_by_phone, edit_order as _edit_order
 from store import get_client as _get_client, save_client as _save_client
+from store import load_menu as _load_menu
 
 MENU_PHOTO_MEDIA_ID = "2017954492405428"
 
-MENU = {
-    "starters": [
-        {"name": "Bruschetta", "price": 6.50, "description": "Toasted bread with tomatoes, garlic, and basil"},
-        {"name": "Soup of the Day", "price": 5.00, "description": "Ask for today's selection"},
-        {"name": "Caesar Salad", "price": 7.50, "description": "Romaine lettuce, croutons, parmesan, caesar dressing"},
-    ],
-    "mains": [
-        {"name": "Grilled Chicken", "price": 14.00, "description": "Served with roasted vegetables and rice"},
-        {"name": "Beef Burger", "price": 12.50, "description": "Angus beef patty, cheddar, lettuce, tomato, fries"},
-        {"name": "Margherita Pizza", "price": 11.00, "description": "Tomato sauce, mozzarella, fresh basil"},
-        {"name": "Grilled Salmon", "price": 16.50, "description": "Atlantic salmon with lemon butter sauce and greens"},
-        {"name": "Pasta Carbonara", "price": 13.00, "description": "Spaghetti, pancetta, egg, parmesan, black pepper"},
-    ],
-    "desserts": [
-        {"name": "Tiramisu", "price": 7.00, "description": "Classic Italian coffee-flavoured dessert"},
-        {"name": "Chocolate Cake", "price": 6.50, "description": "Rich dark chocolate layered cake"},
-        {"name": "Ice Cream", "price": 4.50, "description": "Three scoops, choice of vanilla, chocolate, or strawberry"},
-    ],
-    "drinks": [
-        {"name": "Water", "price": 1.50, "description": "Bottled water"},
-        {"name": "Soft Drink", "price": 2.50, "description": "Coca-Cola, Fanta, Sprite"},
-        {"name": "Fresh Juice", "price": 4.00, "description": "Orange, apple, or mango"},
-        {"name": "Coffee", "price": 3.00, "description": "Espresso, americano, or latte"},
-    ],
-}
+MENU = _load_menu()
 
 RESTAURANT_INFO = {
     "name": "Toto's Kitchen",
@@ -129,6 +107,7 @@ def send_menu_photo():
     return "Menu photo has been sent to the client."
 
 
+@observe
 def place_order(phone: str, items: list):
     resolved_items = []
     for entry in items:
@@ -159,6 +138,7 @@ def place_order(phone: str, items: list):
     return "\n".join(lines)
 
 
+@observe
 def confirm_client_order(order_id: str):
     order = _confirm_order(order_id)
     if not order:
@@ -174,11 +154,13 @@ def confirm_client_order(order_id: str):
     return f"Order {order_id} cannot be confirmed. Current status: {order['status']}."
 
 
+@observe
 def save_client_info(phone: str, name: str, address: str):
     _save_client(phone, name, address)
     return f"Client info saved. Name: {name}, Address: {address}."
 
 
+@observe
 def check_client_order_status(phone: str):
     client_orders = _get_orders_by_phone(phone)
     if not client_orders:
@@ -193,6 +175,7 @@ def check_client_order_status(phone: str):
     return "\n".join(lines)
 
 
+@observe
 def edit_client_order(phone: str, edits: list):
     order = _get_editable_order_by_phone(phone)
     if not order:

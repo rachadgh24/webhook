@@ -5,13 +5,11 @@ import time
 from collections import defaultdict, deque
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
+from langfuse.decorators import observe
 
 load_dotenv()
 
 OFF_TOPIC_RESPONSE = "I can only assist with restaurant-related requests. Please ask a normal question."
-HALLUCINATION_RESPONSE = (
-    "I'm not able to verify that information. Please ask me to check the menu or restaurant details."
-)
 
 _guard_client = AsyncOpenAI(
     api_key=os.getenv("AI_KEY"),
@@ -50,10 +48,11 @@ Rules:
 """
 
 
+@observe(as_type="generation")
 async def classify_input(text: str, last_bot_message: str | None = None) -> dict:
     """Single LLM call that returns {"escalate": bool, "refusal": str | None}."""
     if _OBVIOUS_JAILBREAK_RE.search(text):
-        return {"escalate": False, "refusal": OFF_TOPIC_RESPONSE}
+        return {"escalate": False, "refusal": OFF_TOPIC_RESPONSE, "category": "jailbreak"}
     context_block = (
         f"<previous_bot_message>\n{last_bot_message}\n</previous_bot_message>\n"
         if last_bot_message else ""
@@ -76,9 +75,9 @@ async def classify_input(text: str, last_bot_message: str | None = None) -> dict
         category = data.get("category", "allowed")
         escalate = bool(data.get("escalate", False))
         refusal = OFF_TOPIC_RESPONSE if category in ("jailbreak", "off_topic") else None
-        return {"escalate": escalate, "refusal": refusal}
+        return {"escalate": escalate, "refusal": refusal, "category": category}
     except Exception:
-        return {"escalate": False, "refusal": None}
+        return {"escalate": False, "refusal": None, "category": "allowed"}
 
 
 _RATE_LIMIT_RESPONSE = "You're sending messages too quickly. Please wait a moment before trying again."
@@ -111,7 +110,3 @@ def enforce_output_length(text: str) -> str:
     cut = text[:_MAX_RESPONSE_CHARS]
     last_space = cut.rfind(" ")
     return cut[:last_space].rstrip() if last_space > 0 else cut
-
-
-def check_output(response_text: str) -> str | None:
-    return None

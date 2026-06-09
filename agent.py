@@ -2,9 +2,11 @@ import os
 import json
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
+from langfuse.decorators import observe
 from tools import TOOL_DEFINITIONS, TOOL_HANDLERS, MENU_PHOTO_MEDIA_ID
-from guardrails import classify_input, check_output, check_rate_limit, enforce_output_length
+from guardrails import classify_input, check_rate_limit, enforce_output_length
 from store import set_escalation, load_chat_history, save_chat_history, get_client
+from metrics import log_metric
 
 load_dotenv()
 
@@ -54,6 +56,7 @@ MAX_TOOL_ROUNDS = 5
 SYSTEM_PREFIX_LEN = 2
 
 
+@observe
 def _build_client_context(phone: str) -> str:
     context = f"The current client's phone number is: {phone}"
     client = get_client(phone)
@@ -75,9 +78,11 @@ IMAGE_TOOLS = {
 }
 
 
+@observe
 async def get_ai_response(phone: str, user_prompt: str):
     rate_refusal = check_rate_limit(phone)
     if rate_refusal:
+        await log_metric("guardrail_hit", phone=phone, guardrail_category="rate_limited")
         return {"text": rate_refusal, "images": []}
 
     history = load_chat_history(phone)
@@ -95,15 +100,17 @@ async def get_ai_response(phone: str, user_prompt: str):
         None,
     )
 
-    result = await classify_input(user_prompt, last_bot_message)
-    if result["escalate"]:
+    guard = await classify_input(user_prompt, last_bot_message)
+    if guard["category"] not in ("allowed",):
+        await log_metric("guardrail_hit", phone=phone, guardrail_category=guard["category"])
+    if guard["escalate"]:
         await set_escalation(phone, True)
         return {
             "text": "I'm connecting you with our team right away. A staff member will be with you shortly.",
             "images": [],
         }
-    if result["refusal"]:
-        return {"text": result["refusal"], "images": []}
+    if guard["refusal"]:
+        return {"text": guard["refusal"], "images": []}
 
     history.append({"role": "user", "content": user_prompt})
     _trim_history(history)
@@ -115,10 +122,17 @@ async def get_ai_response(phone: str, user_prompt: str):
             messages=history,
             tools=TOOL_DEFINITIONS,
         )
+        if response.usage:
+            await log_metric(
+                "llm_tokens",
+                phone=phone,
+                prompt_tokens=response.usage.prompt_tokens,
+                completion_tokens=response.usage.completion_tokens,
+            )
         msg = response.choices[0].message
 
         if not msg.tool_calls:
-            text = check_output(msg.content) or msg.content
+            text = msg.content
             text = enforce_output_length(text)
             history.append({"role": "assistant", "content": text})
             save_chat_history(phone, history)
@@ -135,9 +149,15 @@ async def get_ai_response(phone: str, user_prompt: str):
                 images_to_send.append(IMAGE_TOOLS[fn_name])
 
             if handler:
-                result = handler(fn_args)
+                try:
+                    result = handler(fn_args)
+                    await log_metric("tool_call", phone=phone, tool_name=fn_name, success=True)
+                except Exception as exc:
+                    result = f"Tool error: {fn_name}"
+                    await log_metric("tool_call", phone=phone, tool_name=fn_name, success=False)
             else:
                 result = f"Unknown tool: {fn_name}"
+                await log_metric("tool_call", phone=phone, tool_name=fn_name, success=False)
 
             history.append({
                 "role": "tool",

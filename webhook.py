@@ -3,12 +3,15 @@ import hmac
 import json
 import logging
 import os
+import time
 import httpx
 from cachetools import TTLCache
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, Query, Response, HTTPException
 from dotenv import load_dotenv
+from langfuse.decorators import observe
 from agent import get_ai_response
 from store import add_message, get_delivery_log, log_delivery, is_escalated
+from metrics import log_metric
 
 load_dotenv()
 
@@ -56,11 +59,12 @@ def _missing_whatsapp_config():
     return missing
 
 
+@observe
 async def _send_whatsapp_payload(to_phone: str, payload: dict, stage: str):
     missing = _missing_whatsapp_config()
     if missing:
         detail = f"Missing env vars: {', '.join(missing)}"
-        log_delivery(stage, to_phone, ok=False, detail=detail)
+        await log_delivery(stage, to_phone, ok=False, detail=detail)
         print(f"ERROR {stage}: {detail}")
         return False
 
@@ -73,11 +77,12 @@ async def _send_whatsapp_payload(to_phone: str, payload: dict, stage: str):
 
     ok = response.is_success
     detail = response.text
-    log_delivery(stage, to_phone, ok=ok, status_code=response.status_code, detail=detail)
+    await log_delivery(stage, to_phone, ok=ok, status_code=response.status_code, detail=detail)
     print(f"{stage}: to={to_phone} status={response.status_code} body={response.text}")
     return ok
 
 
+@observe
 async def send_whatsapp_message(to_phone: str, text: str):
     payload = {
         "messaging_product": "whatsapp",
@@ -88,6 +93,7 @@ async def send_whatsapp_message(to_phone: str, text: str):
     return await _send_whatsapp_payload(to_phone, payload, "whatsapp_text_send")
 
 
+@observe
 async def send_whatsapp_image(to_phone: str, media_id: str, caption: str = ""):
     payload = {
         "messaging_product": "whatsapp",
@@ -98,17 +104,21 @@ async def send_whatsapp_image(to_phone: str, media_id: str, caption: str = ""):
     return await _send_whatsapp_payload(to_phone, payload, "whatsapp_image_send")
 
 
+@observe
 async def process_inbound_message(sender_phone: str, msg: dict):
     if msg.get("type") == "text":
         user_text = msg["text"]["body"]
         await add_message(sender_phone, "user", user_text)
-        log_delivery("inbound_stored", sender_phone, ok=True, detail=user_text[:120])
+        await log_delivery("inbound_stored", sender_phone, ok=True, detail=user_text[:120])
         if is_escalated(sender_phone):
-            log_delivery("escalated_silence", sender_phone, ok=True, detail="human handoff active")
+            await log_delivery("escalated_silence", sender_phone, ok=True, detail="human handoff active")
             return
         try:
+            t0 = time.monotonic()
             result = await get_ai_response(sender_phone, user_text)
-            log_delivery("ai_response", sender_phone, ok=True, detail=result["text"][:120])
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            await log_metric("message_latency", phone=sender_phone, value_ms=latency_ms)
+            await log_delivery("ai_response", sender_phone, ok=True, detail=result["text"][:120])
 
             await add_message(sender_phone, "assistant", result["text"])
             await send_whatsapp_message(sender_phone, result["text"])
@@ -118,7 +128,7 @@ async def process_inbound_message(sender_phone: str, msg: dict):
                 await send_whatsapp_image(sender_phone, img["media_id"], img["caption"])
         except Exception as ex:
             detail = f"{type(ex).__name__}: {ex}"
-            log_delivery("agent_error", sender_phone, ok=False, detail=detail)
+            await log_delivery("agent_error", sender_phone, ok=False, detail=detail)
             print(f"ERROR in agent: {detail}")
             error_reply = "Sorry, something went wrong. Please try again."
             await add_message(sender_phone, "assistant", error_reply)
@@ -126,7 +136,7 @@ async def process_inbound_message(sender_phone: str, msg: dict):
     else:
         reply = "I can only process text messages. Please send your request as text."
         await add_message(sender_phone, "assistant", reply)
-        log_delivery("non_text_message", sender_phone, ok=True, detail=msg.get("type", "unknown"))
+        await log_delivery("non_text_message", sender_phone, ok=True, detail=msg.get("type", "unknown"))
         await send_whatsapp_message(sender_phone, reply)
 
 

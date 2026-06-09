@@ -3,6 +3,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
 from dotenv import load_dotenv
+from langfuse.decorators import observe
 
 load_dotenv()
 
@@ -12,27 +13,32 @@ listeners = []
 MAX_DELIVERY_LOG = 50
 
 
-def log_delivery(stage: str, phone: str | None = None, ok: bool = True, status_code: int | None = None, detail: str = ""):
-    _supabase.table("delivery_log").insert({
-        "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+@observe
+async def log_delivery(stage: str, phone: str | None = None, ok: bool = True, status_code: int | None = None, detail: str = ""):
+    row = {
+        "at": datetime.now(timezone.utc).isoformat(),
         "stage": stage,
         "phone": phone,
         "ok": ok,
         "status_code": status_code,
         "detail": detail,
-    }).execute()
+    }
+    await asyncio.to_thread(_supabase.table("delivery_log").insert(row).execute)
 
 
+@observe
 def get_delivery_log():
     result = _supabase.table("delivery_log").select("*").order("id", desc=True).limit(MAX_DELIVERY_LOG).execute()
     return result.data
 
 
+@observe
 def get_conversation(phone: str):
     result = _supabase.table("conversations").select("sender, text").eq("phone", phone).order("id").execute()
     return [{"phone": phone, "sender": r["sender"], "text": r["text"]} for r in result.data]
 
 
+@observe
 def get_all_conversations() -> dict:
     result = _supabase.table("conversations").select("phone, sender, text").order("id").execute()
     grouped: dict = {}
@@ -41,16 +47,35 @@ def get_all_conversations() -> dict:
     return grouped
 
 
+@observe
 def get_escalated_phones() -> list:
     result = _supabase.table("escalations").select("phone").eq("escalated", True).execute()
     return [r["phone"] for r in result.data]
 
 
+@observe
+def load_menu() -> dict:
+    result = _supabase.table("menu_items").select("*").eq("active", True).order("id").execute()
+    menu = {}
+    for row in result.data:
+        category = row["category"]
+        if category not in menu:
+            menu[category] = []
+        menu[category].append({
+            "name": row["name"],
+            "price": float(row["price"]),
+            "description": row.get("description", ""),
+        })
+    return menu
+
+
+@observe
 def get_all_orders() -> list:
     result = _supabase.table("orders").select("*").eq("hidden", False).execute()
     return result.data
 
 
+@observe
 def hide_order(order_id: str):
     result = _supabase.table("orders").select("*").eq("order_id", order_id).execute()
     if not result.data:
@@ -62,6 +87,7 @@ def hide_order(order_id: str):
 HISTORY_WINDOW_HOURS = 12
 
 
+@observe
 def load_chat_history(phone: str) -> list:
     result = _supabase.table("chat_histories").select("messages").eq("phone", phone).execute()
     if not result.data:
@@ -89,6 +115,7 @@ def load_chat_history(phone: str) -> list:
     return filtered
 
 
+@observe
 def save_chat_history(phone: str, messages: list) -> None:
     now_iso = datetime.now(timezone.utc).isoformat()
     for msg in messages:
@@ -97,6 +124,7 @@ def save_chat_history(phone: str, messages: list) -> None:
     _supabase.table("chat_histories").upsert({"phone": phone, "messages": messages}).execute()
 
 
+@observe
 def append_to_chat_history(phone: str, message: dict) -> None:
     history = load_chat_history(phone)
     if not history:
@@ -105,11 +133,13 @@ def append_to_chat_history(phone: str, message: dict) -> None:
     save_chat_history(phone, history)
 
 
+@observe
 def is_escalated(phone: str) -> bool:
     result = _supabase.table("escalations").select("escalated").eq("phone", phone).execute()
     return bool(result.data and result.data[0]["escalated"])
 
 
+@observe
 async def set_escalation(phone: str, escalated: bool):
     now_iso = datetime.now(timezone.utc).isoformat()
     if escalated:
@@ -125,11 +155,13 @@ async def set_escalation(phone: str, escalated: bool):
         await queue.put(event)
 
 
+@observe
 def update_last_admin_reply(phone: str) -> None:
     now_iso = datetime.now(timezone.utc).isoformat()
     _supabase.table("escalations").update({"last_admin_reply_at": now_iso}).eq("phone", phone).execute()
 
 
+@observe
 def get_stale_escalations(minutes: int = 15) -> list:
     result = _supabase.table("escalations").select("phone, escalated_at, last_admin_reply_at").eq("escalated", True).execute()
     now = datetime.now(timezone.utc)
@@ -153,6 +185,7 @@ def get_stale_escalations(minutes: int = 15) -> list:
     return stale
 
 
+@observe
 async def add_message(phone: str, sender: str, text: str):
     _supabase.table("conversations").insert({"phone": phone, "sender": sender, "text": text}).execute()
     msg = {"phone": phone, "sender": sender, "text": text}
@@ -160,6 +193,7 @@ async def add_message(phone: str, sender: str, text: str):
         await queue.put({"type": "message", **msg})
 
 
+@observe
 def create_order(phone: str, items: list):
     count_result = _supabase.table("orders").select("order_id", count="exact").execute()
     order_counter = (count_result.count or 0) + 1
@@ -171,12 +205,13 @@ def create_order(phone: str, items: list):
         "items": items,
         "total": total,
         "status": "pending",
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
     }
     _supabase.table("orders").insert(order).execute()
     return order
 
 
+@observe
 def confirm_order(order_id: str):
     result = _supabase.table("orders").select("*").eq("order_id", order_id).execute()
     if not result.data:
@@ -188,26 +223,31 @@ def confirm_order(order_id: str):
     return {**order, "status": "confirmed"}
 
 
+@observe
 def get_order_status(order_id: str):
     result = _supabase.table("orders").select("*").eq("order_id", order_id).execute()
     return result.data[0] if result.data else None
 
 
+@observe
 def get_orders_by_phone(phone: str):
     result = _supabase.table("orders").select("*").eq("phone", phone).execute()
     return result.data
 
 
+@observe
 def get_editable_order_by_phone(phone: str):
     result = _supabase.table("orders").select("*").eq("phone", phone).in_("status", ["pending", "confirmed"]).order("created_at", desc=True).limit(1).execute()
     return result.data[0] if result.data else None
 
 
+@observe
 def get_active_order_by_phone(phone: str):
     result = _supabase.table("orders").select("*").eq("phone", phone).not_.in_("status", ["on_the_way", "delivered"]).order("created_at", desc=True).limit(1).execute()
     return result.data[0] if result.data else None
 
 
+@observe
 def add_items_to_order(order_id: str, new_items: list):
     result = _supabase.table("orders").select("*").eq("order_id", order_id).execute()
     if not result.data:
@@ -225,6 +265,7 @@ def add_items_to_order(order_id: str, new_items: list):
     return {**order, "items": updated_items, "total": updated_total}
 
 
+@observe
 def edit_order(order_id: str, operations: list):
     """Apply a list of operations to an order's items.
 
@@ -254,6 +295,7 @@ def edit_order(order_id: str, operations: list):
     return {**order, "items": updated_items, "total": updated_total}
 
 
+@observe
 def update_order_status(order_id: str, status: str):
     result = _supabase.table("orders").select("*").eq("order_id", order_id).execute()
     if not result.data:
@@ -262,10 +304,12 @@ def update_order_status(order_id: str, status: str):
     return {**result.data[0], "status": status}
 
 
+@observe
 def get_client(phone: str):
     result = _supabase.table("clients").select("*").eq("phone", phone).execute()
     return result.data[0] if result.data else None
 
 
+@observe
 def save_client(phone: str, name: str, address: str) -> None:
     _supabase.table("clients").upsert({"phone": phone, "name": name, "address": address}).execute()
