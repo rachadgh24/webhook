@@ -55,7 +55,7 @@ def get_escalated_phones() -> list:
 
 @observe
 def load_menu() -> dict:
-    result = _supabase.table("menu_items").select("*").eq("active", True).order("id").execute()
+    result = _supabase.table("items").select("*").eq("active", True).order("id").execute()
     menu = {}
     for row in result.data:
         category = row["category"]
