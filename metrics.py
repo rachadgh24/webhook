@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 @observe
 async def log_metric(event: str, phone: str | None = None, **kwargs):
-    “””Fire-and-forget metrics write. Never raises â€” a metric failure must not break the main flow.”””
+    “””Fire-and-forget metrics write. Never raises - a metric failure must not break the main flow.”””
     logger.info(“log_metric start event=%s phone=%s”, event, phone)
     row = {“event”: event, “phone”: phone, **kwargs}
     try:
