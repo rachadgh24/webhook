@@ -5,4 +5,4 @@ python-dotenv==1.2.2
 httpx==0.28.1
 cachetools==5.5.2
 supabase==2.15.2
-langfuse
+langfuse==4.7.1
