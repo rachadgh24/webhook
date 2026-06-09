@@ -1,4 +1,4 @@
-import hashlib
+﻿import hashlib
 import hmac
 import json
 import logging
@@ -8,7 +8,7 @@ import httpx
 from cachetools import TTLCache
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, Query, Response, HTTPException
 from dotenv import load_dotenv
-from langfuse.decorators import observe
+from langfuse import observe
 from agent import get_ai_response
 from store import add_message, get_delivery_log, log_delivery, is_escalated
 from metrics import log_metric

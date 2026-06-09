@@ -1,6 +1,6 @@
-import re as _re
+﻿import re as _re
 import difflib as _difflib
-from langfuse.decorators import observe
+from langfuse import observe
 from store import create_order as _create_order, confirm_order as _confirm_order
 from store import get_order_status as _get_order_status, get_orders_by_phone as _get_orders_by_phone
 from store import get_active_order_by_phone as _get_active_order_by_phone, add_items_to_order as _add_items_to_order
@@ -35,7 +35,7 @@ RESTAURANT_INFO = {
 
 def _find_menu_item(query: str):
     """Exact match first, then fuzzy match for typos (cutoff 0.6).
-    'watter' → Water (0.91), but 'sparkling water' → None (0.50)."""
+    'watter' â†’ Water (0.91), but 'sparkling water' â†’ None (0.50)."""
     q = query.strip().lower()
     flat = [item for items in MENU.values() for item in items]
     names_lower = [item["name"].lower() for item in flat]
@@ -45,7 +45,7 @@ def _find_menu_item(query: str):
         if name == q:
             return flat[i]
 
-    # Fuzzy match — handles typos without matching unrelated strings
+    # Fuzzy match â€” handles typos without matching unrelated strings
     matches = _difflib.get_close_matches(q, names_lower, n=1, cutoff=0.6)
     if matches:
         return flat[names_lower.index(matches[0])]
@@ -58,7 +58,7 @@ def get_full_menu():
     for category, items in MENU.items():
         lines.append(f"\n{category.upper()}:")
         for item in items:
-            lines.append(f"  - {item['name']}: ${item['price']:.2f} — {item['description']}")
+            lines.append(f"  - {item['name']}: ${item['price']:.2f} â€” {item['description']}")
     return "\n".join(lines)
 
 
@@ -68,7 +68,7 @@ def get_category_menu(category: str):
         return f"Category '{category}' not found. Available categories: {', '.join(MENU.keys())}"
     lines = [f"{cat.upper()}:"]
     for item in MENU[cat]:
-        lines.append(f"  - {item['name']}: ${item['price']:.2f} — {item['description']}")
+        lines.append(f"  - {item['name']}: ${item['price']:.2f} â€” {item['description']}")
     return "\n".join(lines)
 
 
@@ -379,7 +379,7 @@ TOOL_DEFINITIONS = [
                             "properties": {
                                 "action": {"type": "string", "enum": ["add", "remove", "set_qty"], "description": "'add' to add a new item or increase qty, 'remove' to delete an item, 'set_qty' to change an item's quantity"},
                                 "name": {"type": "string", "description": "The menu item name"},
-                                "qty": {"type": "integer", "description": "Quantity — required for 'add' and 'set_qty', ignored for 'remove'"},
+                                "qty": {"type": "integer", "description": "Quantity â€” required for 'add' and 'set_qty', ignored for 'remove'"},
                             },
                             "required": ["action", "name"],
                         },
@@ -406,3 +406,4 @@ TOOL_DEFINITIONS = [
         },
     },
 ]
+

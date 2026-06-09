@@ -1,9 +1,9 @@
-import os
+﻿import os
 import asyncio
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
 from dotenv import load_dotenv
-from langfuse.decorators import observe
+from langfuse import observe
 
 load_dotenv()
 
@@ -97,7 +97,7 @@ def load_chat_history(phone: str) -> list:
     filtered = []
     for msg in messages:
         if msg.get("role") == "system" and not msg.get("subtype"):
-            # Static system messages (SYSTEM_PROMPT, phone context) — always keep
+            # Static system messages (SYSTEM_PROMPT, phone context) â€” always keep
             filtered.append(msg)
             continue
         ts_str = msg.get("ts")
@@ -313,3 +313,4 @@ def get_client(phone: str):
 @observe
 def save_client(phone: str, name: str, address: str) -> None:
     _supabase.table("clients").upsert({"phone": phone, "name": name, "address": address}).execute()
+

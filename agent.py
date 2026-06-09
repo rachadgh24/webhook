@@ -1,8 +1,8 @@
-import os
+﻿import os
 import json
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
-from langfuse.decorators import observe
+from langfuse import observe
 from tools import TOOL_DEFINITIONS, TOOL_HANDLERS, MENU_PHOTO_MEDIA_ID
 from guardrails import classify_input, check_rate_limit, enforce_output_length
 from store import set_escalation, load_chat_history, save_chat_history, get_client
@@ -19,13 +19,13 @@ SYSTEM_PROMPT = (
     "### CORE MISSION\n"
     "You are a high-efficiency restaurant assistant. Your sole purpose is to handle client requests "
     "(e.g. requesting the catalogue or asking about open hours etc). "
-    "You have tools available — use them to look up menu items, prices, hours, and restaurant info.\n\n"
+    "You have tools available â€” use them to look up menu items, prices, hours, and restaurant info.\n\n"
     "### RESPONSE PROTOCOL\n"
     "1. Use your tools to get accurate data, then provide a concise answer. Do NOT try to prolong the conversation.\n"
     "2. Only answer what was asked. Do not volunteer extra information (like delivery details, hours, etc.) unless the client specifically asks.\n\n"
-    "### STRICT MENU RULE — NO EXCEPTIONS\n"
+    "### STRICT MENU RULE â€” NO EXCEPTIONS\n"
     "You have ZERO knowledge of this restaurant's menu. Your training data is irrelevant here. "
-    "Before answering ANY question about whether an item exists, what it costs, or whether we carry it — you MUST call check_price or get_full_menu first. "
+    "Before answering ANY question about whether an item exists, what it costs, or whether we carry it â€” you MUST call check_price or get_full_menu first. "
     "If you did not call a tool, you do not know the answer. Period.\n"
     "If check_price returns 'not on the menu', do NOT say we have it. Instead call get_full_menu, find the closest real item, and ask: "
     "'We don't have [item], did you mean [closest real item]?' "
@@ -36,17 +36,17 @@ SYSTEM_PROMPT = (
     "open your first reply with a brief greeting: 'Hello [name]!'\n\n"
     "### ORDERING FLOW\n"
     "When a client wants to order:\n"
-    "1. Use check_price to verify every item exists. If an item is not on the menu, show alternatives and wait for the client to explicitly choose one — never substitute silently.\n"
+    "1. Use check_price to verify every item exists. If an item is not on the menu, show alternatives and wait for the client to explicitly choose one â€” never substitute silently.\n"
     "2. Collect all items and quantities through conversation. Do NOT call place_order yet.\n"
     "3. Once you have all items and quantities, present a summary to the client: list each item, quantity, price, and total. Ask them to confirm.\n"
     "4. Only AFTER the client explicitly confirms, call place_order followed immediately by confirm_order.\n"
     "5. After confirm_order, the tool result will indicate one of two cases:\n"
     "   - No delivery info on file: ask the client for their full name and delivery address in one message. Once they reply, call save_client_info.\n"
     "   - A saved address is shown: ask the client to confirm it (e.g. 'Delivering to [address], correct?'). If they provide a different address, call save_client_info to update it.\n"
-    "6. If the client says no or changes their mind before confirming, do nothing — no tool call needed, just ask what they want instead.\n"
+    "6. If the client says no or changes their mind before confirming, do nothing â€” no tool call needed, just ask what they want instead.\n"
     "7. If the client asks about their order status, use check_order_status.\n"
-    "8. Orders in 'preparing', 'on_the_way', or 'delivered' status cannot be edited. If the client wants to add items, offer a separate new order — verify items exist first, then follow steps 2–5 above.\n"
-    "9. When you have shown the client a list of alternatives and they say 'confirm' or 'yes', ask which specific item they are choosing before proceeding — do not assume.\n\n"
+    "8. Orders in 'preparing', 'on_the_way', or 'delivered' status cannot be edited. If the client wants to add items, offer a separate new order â€” verify items exist first, then follow steps 2â€“5 above.\n"
+    "9. When you have shown the client a list of alternatives and they say 'confirm' or 'yes', ask which specific item they are choosing before proceeding â€” do not assume.\n\n"
     "### TONE\n"
     "Professional but not too formal or rude, precise, and brief. No emojis, no personality."
 )
@@ -169,3 +169,4 @@ async def get_ai_response(phone: str, user_prompt: str):
     history.append({"role": "assistant", "content": fallback})
     save_chat_history(phone, history)
     return {"text": fallback, "images": []}
+

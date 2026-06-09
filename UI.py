@@ -1,6 +1,6 @@
-from fastapi import APIRouter
+﻿from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
-from langfuse.decorators import observe
+from langfuse import observe
 from store import listeners, get_all_conversations, get_all_orders, get_escalated_phones, update_order_status, hide_order, set_escalation, add_message, is_escalated, append_to_chat_history, update_last_admin_reply
 from webhook import send_whatsapp_message
 import asyncio, json
@@ -688,3 +688,4 @@ async def hide_order_endpoint(order_id: str):
     if not result:
         return {"error": "Order not found"}
     return result
+
