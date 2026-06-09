@@ -1,8 +1,11 @@
 ﻿import os
 import json
+import logging
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from langfuse import observe
+
+logger = logging.getLogger(__name__)
 from tools import TOOL_DEFINITIONS, TOOL_HANDLERS, MENU_PHOTO_MEDIA_ID
 from guardrails import classify_input, check_rate_limit, enforce_output_length
 from store import set_escalation, load_chat_history, save_chat_history, get_client
@@ -58,10 +61,12 @@ SYSTEM_PREFIX_LEN = 2
 
 @observe
 def _build_client_context(phone: str) -> str:
+    logger.info("_build_client_context start phone=%s", phone)
     context = f"The current client's phone number is: {phone}"
     client = get_client(phone)
     if client:
         context += f"\nClient name: {client['name']}. Saved delivery address: {client['address']}."
+    logger.info("_build_client_context done phone=%s has_client=%s", phone, client is not None)
     return context
 
 
@@ -80,9 +85,11 @@ IMAGE_TOOLS = {
 
 @observe
 async def get_ai_response(phone: str, user_prompt: str):
+    logger.info("get_ai_response start phone=%s", phone)
     rate_refusal = check_rate_limit(phone)
     if rate_refusal:
         await log_metric("guardrail_hit", phone=phone, guardrail_category="rate_limited")
+        logger.info("get_ai_response done phone=%s rate_limited", phone)
         return {"text": rate_refusal, "images": []}
 
     history = load_chat_history(phone)
@@ -105,11 +112,13 @@ async def get_ai_response(phone: str, user_prompt: str):
         await log_metric("guardrail_hit", phone=phone, guardrail_category=guard["category"])
     if guard["escalate"]:
         await set_escalation(phone, True)
+        logger.info("get_ai_response done phone=%s escalated", phone)
         return {
             "text": "I'm connecting you with our team right away. A staff member will be with you shortly.",
             "images": [],
         }
     if guard["refusal"]:
+        logger.info("get_ai_response done phone=%s guardrail_refusal category=%s", phone, guard.get("category"))
         return {"text": guard["refusal"], "images": []}
 
     history.append({"role": "user", "content": user_prompt})
@@ -136,6 +145,7 @@ async def get_ai_response(phone: str, user_prompt: str):
             text = enforce_output_length(text)
             history.append({"role": "assistant", "content": text})
             save_chat_history(phone, history)
+            logger.info("get_ai_response done phone=%s text_len=%d images=%d", phone, len(text), len(images_to_send))
             return {"text": text, "images": images_to_send}
 
         history.append(msg.model_dump(exclude_none=True))
@@ -168,5 +178,6 @@ async def get_ai_response(phone: str, user_prompt: str):
     fallback = "Sorry, I couldn't process your request. Please try again."
     history.append({"role": "assistant", "content": fallback})
     save_chat_history(phone, history)
+    logger.info("get_ai_response done phone=%s max_tool_rounds_exceeded", phone)
     return {"text": fallback, "images": []}
 

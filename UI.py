@@ -1,6 +1,9 @@
-﻿from fastapi import APIRouter
+﻿import logging
+from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 from langfuse import observe
+
+logger = logging.getLogger(__name__)
 from store import listeners, get_all_conversations, get_all_orders, get_escalated_phones, update_order_status, hide_order, set_escalation, add_message, is_escalated, append_to_chat_history, update_last_admin_reply
 from webhook import send_whatsapp_message
 import asyncio, json
@@ -643,49 +646,70 @@ async def sse():
 @router.get("/history")
 @observe
 async def history():
-    return get_all_conversations()
+    logger.info("history start")
+    result = get_all_conversations()
+    logger.info("history done phones=%d", len(result))
+    return result
 
 @router.get("/escalated")
 @observe
 async def get_escalated():
-    return get_escalated_phones()
+    logger.info("get_escalated start")
+    result = get_escalated_phones()
+    logger.info("get_escalated done count=%d", len(result))
+    return result
 
 @router.post("/escalate/{phone}")
 @observe
 async def set_escalation_endpoint(phone: str, body: dict):
+    logger.info("set_escalation_endpoint start phone=%s", phone)
     await set_escalation(phone, bool(body.get("escalated", False)))
-    return {"phone": phone, "escalated": is_escalated(phone)}
+    result = {"phone": phone, "escalated": is_escalated(phone)}
+    logger.info("set_escalation_endpoint done phone=%s escalated=%s", phone, result["escalated"])
+    return result
 
 @router.post("/admin-reply/{phone}")
 @observe
 async def admin_reply(phone: str, body: dict):
+    logger.info("admin_reply start phone=%s", phone)
     text = body.get("text", "").strip()
     if not text:
+        logger.info("admin_reply done phone=%s empty_message", phone)
         return {"error": "Empty message"}
     await add_message(phone, "admin", text)
     append_to_chat_history(phone, {"role": "assistant", "content": f"[Human agent]: {text}"})
     update_last_admin_reply(phone)
     await send_whatsapp_message(phone, text)
+    logger.info("admin_reply done phone=%s", phone)
     return {"ok": True}
 
 @router.get("/orders")
 @observe
 async def get_orders():
-    return get_all_orders()
+    logger.info("get_orders start")
+    result = get_all_orders()
+    logger.info("get_orders done count=%d", len(result))
+    return result
 
 @router.post("/orders/{order_id}/status")
 @observe
 async def set_order_status(order_id: str, body: dict):
+    logger.info("set_order_status start order_id=%s status=%s", order_id, body.get("status"))
     result = update_order_status(order_id, body["status"])
     if not result:
+        logger.info("set_order_status done order_id=%s not_found", order_id)
         return {"error": "Order not found"}
+    logger.info("set_order_status done order_id=%s", order_id)
     return result
 
 @router.post("/orders/{order_id}/hide")
 @observe
 async def hide_order_endpoint(order_id: str):
+    logger.info("hide_order_endpoint start order_id=%s", order_id)
     result = hide_order(order_id)
     if not result:
+        logger.info("hide_order_endpoint done order_id=%s not_found", order_id)
         return {"error": "Order not found"}
+    logger.info("hide_order_endpoint done order_id=%s", order_id)
     return result
 

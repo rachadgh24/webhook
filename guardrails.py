@@ -2,10 +2,13 @@
 import json
 import os
 import time
+import logging
 from collections import defaultdict, deque
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
 from langfuse import observe
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -51,7 +54,9 @@ Rules:
 @observe(as_type="generation")
 async def classify_input(text: str, last_bot_message: str | None = None) -> dict:
     """Single LLM call that returns {"escalate": bool, "refusal": str | None}."""
+    logger.info("classify_input start text_len=%d", len(text))
     if _OBVIOUS_JAILBREAK_RE.search(text):
+        logger.info("classify_input done category=jailbreak (regex)")
         return {"escalate": False, "refusal": OFF_TOPIC_RESPONSE, "category": "jailbreak"}
     context_block = (
         f"<previous_bot_message>\n{last_bot_message}\n</previous_bot_message>\n"
@@ -70,13 +75,16 @@ async def classify_input(text: str, last_bot_message: str | None = None) -> dict
         raw = response.choices[0].message.content.strip()
         m = re.search(r'\{[^}]+\}', raw)
         if not m:
+            logger.info("classify_input done no_json_match")
             return {"escalate": False, "refusal": None}
         data = json.loads(m.group())
         category = data.get("category", "allowed")
         escalate = bool(data.get("escalate", False))
         refusal = OFF_TOPIC_RESPONSE if category in ("jailbreak", "off_topic") else None
+        logger.info("classify_input done category=%s escalate=%s", category, escalate)
         return {"escalate": escalate, "refusal": refusal, "category": category}
     except Exception:
+        logger.error("classify_input error", exc_info=True)
         return {"escalate": False, "refusal": None, "category": "allowed"}
 
 

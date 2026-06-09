@@ -1,6 +1,9 @@
 ﻿import re as _re
 import difflib as _difflib
+import logging
 from langfuse import observe
+
+logger = logging.getLogger(__name__)
 from store import create_order as _create_order, confirm_order as _confirm_order
 from store import get_order_status as _get_order_status, get_orders_by_phone as _get_orders_by_phone
 from store import get_active_order_by_phone as _get_active_order_by_phone, add_items_to_order as _add_items_to_order
@@ -109,6 +112,7 @@ def send_menu_photo():
 
 @observe
 def place_order(phone: str, items: list):
+    logger.info("place_order start phone=%s items=%d", phone, len(items))
     resolved_items = []
     for entry in items:
         name = entry.get("name", "")
@@ -120,6 +124,7 @@ def place_order(phone: str, items: list):
             name = m.group(2)
         item = _find_menu_item(name)
         if not item:
+            logger.info("place_order done phone=%s item_not_found=%s", phone, name)
             return f"'{name}' is not on the menu. Please check the menu and try again."
         resolved_items.append({"name": item["name"], "qty": qty, "price": item["price"]})
 
@@ -135,13 +140,16 @@ def place_order(phone: str, items: list):
     lines.append(f"Total: ${order['total']:.2f}")
     lines.append(f"Status: {order['status']}")
     lines.append("Ask the client to confirm the order.")
+    logger.info("place_order done phone=%s order_id=%s", phone, order["order_id"])
     return "\n".join(lines)
 
 
 @observe
 def confirm_client_order(order_id: str):
+    logger.info("confirm_client_order start order_id=%s", order_id)
     order = _confirm_order(order_id)
     if not order:
+        logger.info("confirm_client_order done order_id=%s not_found", order_id)
         return f"Order {order_id} not found."
     if order["status"] == "confirmed":
         msg = f"Order {order_id} is confirmed. Total: ${order['total']:.2f}. It will be prepared shortly."
@@ -150,20 +158,26 @@ def confirm_client_order(order_id: str):
             msg += f"\nSaved delivery address: {client['address']}. Ask the client to confirm this address (e.g. 'Delivering to {client['address']}, correct?'). If they provide a different address, call save_client_info to update it."
         else:
             msg += "\nNo delivery info on file. Ask the client for their full name and delivery address in one message, then call save_client_info."
+        logger.info("confirm_client_order done order_id=%s confirmed", order_id)
         return msg
+    logger.info("confirm_client_order done order_id=%s status=%s", order_id, order["status"])
     return f"Order {order_id} cannot be confirmed. Current status: {order['status']}."
 
 
 @observe
 def save_client_info(phone: str, name: str, address: str):
+    logger.info("save_client_info start phone=%s", phone)
     _save_client(phone, name, address)
+    logger.info("save_client_info done phone=%s", phone)
     return f"Client info saved. Name: {name}, Address: {address}."
 
 
 @observe
 def check_client_order_status(phone: str):
+    logger.info("check_client_order_status start phone=%s", phone)
     client_orders = _get_orders_by_phone(phone)
     if not client_orders:
+        logger.info("check_client_order_status done phone=%s no_orders", phone)
         return "No orders found for this client."
     latest = client_orders[-1]
     lines = [f"Order {latest['order_id']}:"]
@@ -172,13 +186,16 @@ def check_client_order_status(phone: str):
     lines.append(f"Total: ${latest['total']:.2f}")
     lines.append(f"Status: {latest['status']}")
     lines.append(f"Placed at: {latest['created_at']}")
+    logger.info("check_client_order_status done phone=%s order_id=%s", phone, latest["order_id"])
     return "\n".join(lines)
 
 
 @observe
 def edit_client_order(phone: str, edits: list):
+    logger.info("edit_client_order start phone=%s edits=%d", phone, len(edits))
     order = _get_editable_order_by_phone(phone)
     if not order:
+        logger.info("edit_client_order done phone=%s no_editable_order", phone)
         return "No editable order found. Orders can only be edited when they are pending or confirmed."
 
     operations = []
@@ -206,16 +223,19 @@ def edit_client_order(phone: str, edits: list):
             operations.append({"action": action, "name": matched, "qty": qty})
 
         else:
+            logger.info("edit_client_order done phone=%s unknown_action=%s", phone, action)
             return f"Unknown edit action '{action}'. Use 'add', 'remove', or 'set_qty'."
 
     updated = _edit_order(order["order_id"], operations)
     if not updated["items"]:
+        logger.info("edit_client_order done phone=%s order_id=%s empty_after_edit", phone, order["order_id"])
         return f"Order {order['order_id']} now has no items. Add something or it will remain empty."
     lines = [f"Order {updated['order_id']} updated:"]
     for item in updated["items"]:
         lines.append(f"  - {item['name']} x{item['qty']} = ${item['price'] * item['qty']:.2f}")
     lines.append(f"Total: ${updated['total']:.2f}")
     lines.append(f"Status: {updated['status']}")
+    logger.info("edit_client_order done phone=%s order_id=%s total=%s", phone, updated["order_id"], updated["total"])
     return "\n".join(lines)
 
 

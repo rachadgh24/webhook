@@ -61,11 +61,13 @@ def _missing_whatsapp_config():
 
 @observe
 async def _send_whatsapp_payload(to_phone: str, payload: dict, stage: str):
+    logger.info("_send_whatsapp_payload start to=%s stage=%s", to_phone, stage)
     missing = _missing_whatsapp_config()
     if missing:
         detail = f"Missing env vars: {', '.join(missing)}"
         await log_delivery(stage, to_phone, ok=False, detail=detail)
         print(f"ERROR {stage}: {detail}")
+        logger.info("_send_whatsapp_payload done to=%s stage=%s ok=False missing_config", to_phone, stage)
         return False
 
     url = f"https://graph.facebook.com/v21.0/{PHONE_NUMBER_ID}/messages"
@@ -79,33 +81,41 @@ async def _send_whatsapp_payload(to_phone: str, payload: dict, stage: str):
     detail = response.text
     await log_delivery(stage, to_phone, ok=ok, status_code=response.status_code, detail=detail)
     print(f"{stage}: to={to_phone} status={response.status_code} body={response.text}")
+    logger.info("_send_whatsapp_payload done to=%s stage=%s ok=%s status=%d", to_phone, stage, ok, response.status_code)
     return ok
 
 
 @observe
 async def send_whatsapp_message(to_phone: str, text: str):
+    logger.info("send_whatsapp_message start to=%s", to_phone)
     payload = {
         "messaging_product": "whatsapp",
         "to": to_phone,
         "type": "text",
         "text": {"body": text},
     }
-    return await _send_whatsapp_payload(to_phone, payload, "whatsapp_text_send")
+    result = await _send_whatsapp_payload(to_phone, payload, "whatsapp_text_send")
+    logger.info("send_whatsapp_message done to=%s ok=%s", to_phone, result)
+    return result
 
 
 @observe
 async def send_whatsapp_image(to_phone: str, media_id: str, caption: str = ""):
+    logger.info("send_whatsapp_image start to=%s media_id=%s", to_phone, media_id)
     payload = {
         "messaging_product": "whatsapp",
         "to": to_phone,
         "type": "image",
         "image": {"id": media_id, "caption": caption},
     }
-    return await _send_whatsapp_payload(to_phone, payload, "whatsapp_image_send")
+    result = await _send_whatsapp_payload(to_phone, payload, "whatsapp_image_send")
+    logger.info("send_whatsapp_image done to=%s ok=%s", to_phone, result)
+    return result
 
 
 @observe
 async def process_inbound_message(sender_phone: str, msg: dict):
+    logger.info("process_inbound_message start phone=%s type=%s", sender_phone, msg.get("type"))
     if msg.get("type") == "text":
         user_text = msg["text"]["body"]
         await add_message(sender_phone, "user", user_text)
@@ -127,6 +137,7 @@ async def process_inbound_message(sender_phone: str, msg: dict):
                 await add_message(sender_phone, "assistant", f"[Photo: {img['caption']}]")
                 await send_whatsapp_image(sender_phone, img["media_id"], img["caption"])
         except Exception as ex:
+            logger.error("process_inbound_message error phone=%s: %s", sender_phone, ex)
             detail = f"{type(ex).__name__}: {ex}"
             await log_delivery("agent_error", sender_phone, ok=False, detail=detail)
             print(f"ERROR in agent: {detail}")
@@ -138,6 +149,7 @@ async def process_inbound_message(sender_phone: str, msg: dict):
         await add_message(sender_phone, "assistant", reply)
         await log_delivery("non_text_message", sender_phone, ok=True, detail=msg.get("type", "unknown"))
         await send_whatsapp_message(sender_phone, reply)
+    logger.info("process_inbound_message done phone=%s", sender_phone)
 
 
 @router.get("/webhook")
